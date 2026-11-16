@@ -6,6 +6,8 @@ import {
   isLoopLogicNode,
   isMergeNode,
   LOOP_ACTION_INTEGRATIONS,
+  LOOP_LOGIC_KINDS,
+  LOOP_SCHEDULE_MODES,
   withArchitectureDefaults,
   type LoopActionIntegration,
   type LoopAgentRole,
@@ -23,6 +25,34 @@ import {
   LoopWorkGroupSchema,
   validateLoopWorkGroups,
 } from "./loop-work-group.js";
+import {
+  LOOP_LAYER_LIMIT,
+  LoopLayerSchema,
+} from "./loop-layer.js";
+import { LoopArmedScheduleSchema } from "./loop-schedule.js";
+
+export {
+  LOOP_LAYER_COLOR_KEYS,
+  LOOP_LAYER_LIMIT,
+  LOOP_LAYER_PADDING,
+  LOOP_LAYER_TITLE_BAR_HEIGHT,
+  LoopLayerColorKeySchema,
+  LoopLayerSchema,
+  computeLoopLayerFrameBounds,
+  createLoopLayerId,
+  nextLoopLayerColorKey,
+  nextLoopLayerTitle,
+  nodeCenterInRect,
+  normalizeMarqueeRect,
+  pickNodesInMarquee,
+  pruneLoopLayerMembers,
+  resizeRectFromEdge,
+  type LoopLayer,
+  type LoopLayerColorKey,
+  type LoopLayerNodeBounds,
+  type LoopLayerRect,
+  type LoopLayerResizeEdge,
+} from "./loop-layer.js";
 
 export {
   LOOP_ACTION_INTEGRATIONS,
@@ -37,6 +67,8 @@ export {
   LOOP_MEMORY_MODES,
   LOOP_NODE_TYPES,
   LOOP_SATELLITE_KINDS,
+  LOOP_WIRING_LIST_THRESHOLD,
+  LOOP_SCHEDULE_MODES,
   architectureFromLegacyRole,
   configPortForSatelliteKind,
   effectiveConfigPort,
@@ -62,7 +94,22 @@ export {
   type LoopNodeArchitectureFields,
   type LoopNodeType,
   type LoopSatelliteKind,
+  type LoopScheduleMode,
 } from "./loop-node-architecture.js";
+
+export {
+  LoopArmedScheduleSchema,
+  LoopScheduleModeSchema,
+  computeScheduleFireAt,
+  createArmedScheduleId,
+  isScheduleDue,
+  type LoopArmedSchedule,
+} from "./loop-schedule.js";
+
+export {
+  collectUpstreamAgentAcceptance,
+  type LoopLabAcceptanceItem,
+} from "./loop-lab-acceptance.js";
 
 export const LOOP_GRAPH_VERSION = "0.1.0" as const;
 
@@ -108,22 +155,17 @@ export const LoopHumanModeSchema = z.enum([
 
 export const LoopActionIntegrationSchema = z.enum(LOOP_ACTION_INTEGRATIONS);
 
-export const LoopLogicKindSchema = z.enum([
-  "condition",
-  "loop",
-  "merge",
-  "exit",
-  "retry",
-  "wait",
-]);
+export const LoopLogicKindSchema = z.enum(LOOP_LOGIC_KINDS);
 
 export const LoopSatelliteKindSchema = z.enum([
   "model",
   "memory",
   "skill",
   "mcp",
+  "mcp_list",
   "rules",
   "pack",
+  "skill_list",
 ]);
 
 export const LoopAgentConfigPortSchema = z.enum([
@@ -136,6 +178,26 @@ export const LoopAgentConfigPortSchema = z.enum([
 
 export const LoopMemoryModeSchema = z.enum(["project", "buffer", "none"]);
 
+/** One entry inside an MCP / Skills list satellite. */
+export const LoopWiringListMemberSchema = z
+  .object({
+    id: z.string().min(1).max(80),
+    title: z.string().trim().min(1).max(120),
+    kind: z.enum(["mcp", "skill"]),
+    configRef: z
+      .object({
+        modelProfileId: z.string().min(1).max(120).optional(),
+        skillId: z.string().min(1).max(120).optional(),
+        mcpServerId: z.string().min(1).max(80).optional(),
+        memoryMode: LoopMemoryModeSchema.optional(),
+        packId: z.string().min(1).max(120).optional(),
+        rulesId: z.string().min(1).max(120).optional(),
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 export const LoopConfigRefSchema = z
   .object({
     modelProfileId: z.string().min(1).max(120).optional(),
@@ -144,6 +206,8 @@ export const LoopConfigRefSchema = z
     memoryMode: LoopMemoryModeSchema.optional(),
     packId: z.string().min(1).max(120).optional(),
     rulesId: z.string().min(1).max(120).optional(),
+    /** Members when satelliteKind is mcp_list / skill_list. */
+    wiringListMembers: z.array(LoopWiringListMemberSchema).max(64).optional(),
   })
   .strict();
 
@@ -184,6 +248,41 @@ export const LoopNodeArchitectureFieldsSchema = z
   .strict();
 
 export const AcceptanceKindSchema = z.enum(["machine", "human"]);
+
+export {
+  LOOP_DUTY_ITEM_MAX,
+  LOOP_DUTY_ITEM_TEXT_MAX,
+  LoopDutyItemSchema,
+  LoopDutyItemSourceSchema,
+  LoopDutyItemStatusSchema,
+  LoopDutyKindSchema,
+  LoopDutyProgressItemSchema,
+  areRequiredDutiesComplete,
+  dutyItemsFromDevPlanTasks,
+  dutyItemsFromPrompt,
+  dutyItemsToAcceptance,
+  dutyProgressCounts,
+  hasDutyAssignment,
+  initDutyProgress,
+  markAllDutiesDone,
+  mutateDutyItems,
+  newDutyItemId,
+  resolveDutyItems,
+  seedDutyItemsFromCapabilityPrompt,
+  splitPromptIntoDutyTexts,
+  syncDutyProgressWithItems,
+  toggleDutyProgressItem,
+  type LoopDutyChecklistMutateOp,
+  type LoopDutyItem,
+  type LoopDutyItemSource,
+  type LoopDutyItemStatus,
+  type LoopDutyProgressItem,
+} from "./loop-duty.js";
+
+import {
+  LoopDutyItemSchema,
+  LoopDutyProgressItemSchema,
+} from "./loop-duty.js";
 
 export const LoopInstanceStatusSchema = z.enum([
   "queued",
@@ -259,8 +358,12 @@ export const IntentGraphNodeSchema = z
     timeoutMs: z.number().int().positive().max(600_000).optional(),
     /** Logic retry limit when logicKind === "retry". */
     retryLimit: z.number().int().positive().max(20).optional(),
-    /** Logic wait duration when logicKind === "wait". */
-    waitMs: z.number().int().nonnegative().max(3_600_000).optional(),
+    /** Logic wait / schedule delay duration (ms). */
+    waitMs: z.number().int().nonnegative().max(604_800_000).optional(),
+    /** Schedule mode when logicKind === "schedule". */
+    scheduleMode: z.enum(LOOP_SCHEDULE_MODES).optional(),
+    /** Absolute schedule time (ISO) when scheduleMode === "at". */
+    scheduleAt: z.string().trim().min(1).max(64).optional(),
     /** Human assignee / approver label (not auth proof). */
     humanAssignee: z.string().trim().min(1).max(120).optional(),
     /** Allowed human operations for approval/decision nodes. */
@@ -281,6 +384,13 @@ export const IntentGraphNodeSchema = z
     agentWiringOverride: AgentWiringOverrideSchema.optional(),
     /** Agent Work Group membership (WG-D3: at most one group). */
     workGroupId: z.string().min(1).optional(),
+    /**
+     * Workflow assignment checklist for this node (what must be completed).
+     * Preferred over prose `prompt` for canvas body once authored.
+     */
+    dutyItems: z.array(LoopDutyItemSchema).max(20).optional(),
+    /** True once the user or agent has edited the assignment checklist. */
+    dutyEdited: z.boolean().optional(),
     position: IntentGraphPositionSchema,
     authoringSessionId: z.string().min(1).optional(),
   })
@@ -299,6 +409,11 @@ export const IntentGraphEdgeSchema = z
     kind: IntentEdgeKindSchema.optional(),
     /** Named branch for conditional edges (e.g. true / false / pass). */
     branchKey: z.string().trim().min(1).max(80).optional(),
+    /**
+     * Short human-facing label parked near the source port on decision
+     * diamonds (Condition / Human Approval). Independent of mid-edge `prompt`.
+     */
+    branchLabel: z.string().trim().min(1).max(80).optional(),
     sourcePort: IntentEdgePortSchema.optional(),
     targetPort: IntentEdgePortSchema.optional(),
     /**
@@ -314,8 +429,8 @@ export const IntentGraphEdgeSchema = z
      */
     configPort: LoopAgentConfigPortSchema.optional(),
     /**
-     * When `source` or `target` is a work-group id: which boundary port.
-     * Defaults: source→out, target→in.
+     * When `source` or `target` is a work-group id: geometric mid-side
+     * attachment (`n`/`e`/`s`/`w`). Legacy `in`/`out` normalize to `w`/`e`.
      */
     workGroupPort: LoopWorkGroupPortSchema.optional(),
     authoringSessionId: z.string().min(1).optional(),
@@ -332,6 +447,13 @@ export const IntentGraphSchema = z
     workGroups: z.array(LoopWorkGroupSchema).max(64).optional(),
     /** Monotonic seq for default titles (`Workgroup N`). */
     workGroupSeq: z.number().int().nonnegative().optional(),
+    /**
+     * Visual stage layers (frontend presentation only — ignored by compile/runtime).
+     * Overlap / nesting allowed; membership does not move nodes.
+     */
+    layers: z.array(LoopLayerSchema).max(LOOP_LAYER_LIMIT).optional(),
+    /** Monotonic seq for default titles (`Stage N`). */
+    layerSeq: z.number().int().nonnegative().optional(),
   })
   .strict();
 
@@ -360,6 +482,12 @@ export const LoopSpecNodeSchema = z
     resolvedWiring: AgentWiringOverrideSchema.optional(),
     /** Work-group membership snapshot from Intent. */
     workGroupId: z.string().min(1).optional(),
+    /** Copied from Intent for wait/schedule timing. */
+    waitMs: z.number().int().nonnegative().max(604_800_000).optional(),
+    scheduleMode: z.enum(LOOP_SCHEDULE_MODES).optional(),
+    scheduleAt: z.string().trim().min(1).max(64).optional(),
+    /** Copied from Intent for notify/lab/action params. */
+    actionParams: IntentGraphNodeActionParamsSchema.optional(),
     goal: z.string().trim().min(1).max(1000),
     constraints: z.array(z.string().trim().min(1).max(500)).max(20),
     inputs: z.array(z.string().trim().min(1).max(240)).max(20),
@@ -537,6 +665,13 @@ export const LoopNodeRecordSchema = z
     artifactIds: z.array(z.string().min(1)).max(20).optional(),
     errorMessage: z.string().trim().max(1000).optional(),
     attempt: z.number().int().nonnegative().optional(),
+    /** Runtime checklist progress for this node's duty / acceptance items. */
+    dutyProgress: z.array(LoopDutyProgressItemSchema).max(20).optional(),
+    /**
+     * Runtime duty overlay (agent/user dynamic edits during a run).
+     * When set, UI/gates prefer this over Spec acceptance texts.
+     */
+    dutyItems: z.array(LoopDutyItemSchema).max(20).optional(),
   })
   .strict();
 
@@ -896,6 +1031,11 @@ export const LoopGraphDocumentSchema = z
     draft: IntentGraphSchema,
     approvedSpecs: z.array(LoopSpecSchema).max(50),
     instances: z.array(LoopInstanceSchema).max(50),
+    /**
+     * Armed wall-clock schedules that will auto createRun when due.
+     * Cleared on fire or disarm.
+     */
+    armedSchedules: z.array(LoopArmedScheduleSchema).max(16).optional(),
     linkedSessionIds: z.array(z.string().min(1)).max(20),
     pendingCompile: z
       .object({
@@ -1042,7 +1182,9 @@ export type IntentGraphNode = z.infer<typeof IntentGraphNodeSchema>;
 export type IntentGraphEdge = z.infer<typeof IntentGraphEdgeSchema>;
 export type IntentGraphNodeType = z.infer<typeof IntentGraphNodeTypeSchema>;
 export type LoopConfigRef = z.infer<typeof LoopConfigRefSchema>;
+export type LoopWiringListMember = z.infer<typeof LoopWiringListMemberSchema>;
 export type AgentWiringOverride = z.infer<typeof AgentWiringOverrideSchema>;
+export type LoopAcceptanceItem = z.infer<typeof LoopAcceptanceItemSchema>;
 export type LoopSpec = z.infer<typeof LoopSpecSchema>;
 export type LoopSpecNode = z.infer<typeof LoopSpecNodeSchema>;
 export type LoopSpecEdge = z.infer<typeof LoopSpecEdgeSchema>;
@@ -1115,6 +1257,8 @@ export function emptyIntentGraph(revision = 0): IntentGraph {
     edges: [],
     workGroups: [],
     workGroupSeq: 0,
+    layers: [],
+    layerSeq: 0,
   };
 }
 
@@ -1178,7 +1322,10 @@ function enrichDraftArchitecture(draft: unknown): unknown {
     typeof d.workGroupSeq === "number" && d.workGroupSeq >= 0
       ? d.workGroupSeq
       : 0;
-  return { ...d, nodes, workGroups, workGroupSeq };
+  const layers = Array.isArray(d.layers) ? d.layers : [];
+  const layerSeq =
+    typeof d.layerSeq === "number" && d.layerSeq >= 0 ? d.layerSeq : 0;
+  return { ...d, nodes, workGroups, workGroupSeq, layers, layerSeq };
 }
 
 function enrichSpecArchitecture(spec: unknown): unknown {
@@ -1258,10 +1405,12 @@ export function getIntentGraphCompileIssues(draft: IntentGraph): IntentGraphRead
     return issues;
   }
   for (const node of dutyNodes) {
-    if (!node.prompt.trim()) {
+    const hasItems = (node.dutyItems?.length ?? 0) > 0;
+    const hasPrompt = Boolean(node.prompt.trim());
+    if (!hasItems && !hasPrompt) {
       issues.push({
-        path: `nodes.${node.id}.prompt`,
-        message: `Node "${node.title}" needs a description`,
+        path: `nodes.${node.id}.dutyItems`,
+        message: `Node "${node.title}" needs a duty checklist (or description)`,
       });
     }
   }

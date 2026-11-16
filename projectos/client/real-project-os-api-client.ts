@@ -1641,6 +1641,41 @@ export class RealProjectOSApiClient implements ProjectOSApi {
     return this.transport.resolveLoopHitl(projectId, loopId, instanceId, answers);
   }
 
+  patchLoopDutyProgress(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      itemId: string;
+      status: import("../contracts/loop-graph.js").LoopDutyItemStatus;
+    },
+  ) {
+    return this.transport.patchLoopDutyProgress(
+      projectId,
+      loopId,
+      instanceId,
+      input,
+    );
+  }
+
+  mutateLoopDutyChecklist(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      mutate: import("../contracts/loop-graph.js").LoopDutyChecklistMutateOp;
+    },
+  ) {
+    return this.transport.mutateLoopDutyChecklist(
+      projectId,
+      loopId,
+      instanceId,
+      input,
+    );
+  }
+
   getLoopInstanceEvents(projectId: string, loopId: string, instanceId: string) {
     return this.transport.getLoopInstanceEvents(projectId, loopId, instanceId);
   }

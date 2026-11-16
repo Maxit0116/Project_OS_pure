@@ -8,6 +8,7 @@ import {
   portPoint,
   preferredPortsForPair,
   routeLoopEdge,
+  routeLoopEdgePreview,
   routeProvidesCurve,
   formatEdgeLabel,
   truncateEdgeLabel,
@@ -263,6 +264,88 @@ describe('loopEdgeRouting', () => {
         p.y < blocker.position.y + LOOP_NODE_H + LOOP_EDGE_NODE_CLEARANCE
       expect(insideBlocker).toBe(false)
     }
+  })
+
+  it('rubber-band preview stays short instead of perimeter-detouring the graph', () => {
+    const source = {
+      id: 'preview-src',
+      title: 'Src',
+      prompt: '',
+      position: { x: 0, y: 0 },
+    }
+    const cursor = { x: 120, y: 140 }
+    // Dense blockers that would force a full-graph perimeter on free-endpoint routing.
+    const blockers = Array.from({ length: 8 }, (_, index) => ({
+      id: `blk-${index}`,
+      title: 'Blk',
+      prompt: '',
+      position: {
+        x: 40 + (index % 4) * 80,
+        y: 40 + Math.floor(index / 4) * 90,
+      },
+    }))
+    const preview = routeLoopEdgePreview({
+      source,
+      endPoint: cursor,
+      sourcePort: 'e',
+    })
+    const detour = routeLoopEdge({
+      source,
+      endPoint: cursor,
+      sourcePort: 'e',
+      // Force the old preview behavior: treat every node as an obstacle.
+      // With the free-endpoint guard this now ignores foreign obstacles —
+      // pass a fake target so obstacle avoidance still runs for comparison.
+      target: {
+        id: 'ghost',
+        title: 'Ghost',
+        prompt: '',
+        position: { x: cursor.x - LOOP_NODE_W / 2, y: cursor.y - LOOP_NODE_H / 2 },
+      },
+      targetPort: 'w',
+      obstacles: [source, ...blockers],
+    })
+    const previewLen = preview.points.reduce((sum, point, index, all) => {
+      if (index === 0) return 0
+      const prev = all[index - 1]!
+      return sum + Math.hypot(point.x - prev.x, point.y - prev.y)
+    }, 0)
+    const detourLen = detour.points.reduce((sum, point, index, all) => {
+      if (index === 0) return 0
+      const prev = all[index - 1]!
+      return sum + Math.hypot(point.x - prev.x, point.y - prev.y)
+    }, 0)
+    expect(countBends(preview.points)).toBeLessThanOrEqual(3)
+    expect(previewLen).toBeLessThan(detourLen)
+    expect(preview.sourcePort).toBe('e')
+    expect(preview.x2).toBe(cursor.x)
+    expect(preview.y2).toBe(cursor.y)
+  })
+
+  it('free-endpoint routeLoopEdge ignores foreign obstacles (preview-safe)', () => {
+    const source = {
+      id: 'free-src',
+      title: 'Src',
+      prompt: '',
+      position: { x: 0, y: 0 },
+    }
+    // Cursor east of the E port — short L/stub path, not a graph perimeter.
+    const cursor = { x: 320, y: 90 }
+    const blocker = {
+      id: 'mid',
+      title: 'Mid',
+      prompt: '',
+      position: { x: 220, y: 10 },
+    }
+    const routed = routeLoopEdge({
+      source,
+      endPoint: cursor,
+      sourcePort: 'e',
+      obstacles: [source, blocker],
+    })
+    expect(countBends(routed.points)).toBeLessThanOrEqual(3)
+    expect(routed.x2).toBe(cursor.x)
+    expect(routed.y2).toBe(cursor.y)
   })
 
   it('does not hide bends under the source or target node', () => {

@@ -179,6 +179,10 @@ import {
 } from "./loop-execution-loopback-durable.js";
 import { createWorkspacePathDigester } from "./loop-approval-binding.js";
 import { getLoopGraph } from "./loop-graph-service.js";
+import {
+  getLoopLabVerifyBridge,
+  getLoopNotifyBridge,
+} from "./loop-workbench-bridges.js";
 
 function createLoopExecutionLoopbackHost(): LoopExecutionLoopbackHost {
   return new LoopExecutionLoopbackHost();
@@ -1319,6 +1323,70 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     return this.openWorkspace(this.sampleWorkspaceRoot);
   }
 
+  /**
+   * Startup reconcile of unfinished agent-runs. Scheduled after open returns so
+   * large `.projectos/agent-runs` directories do not block the welcome → ready
+   * transition. Safe to run after the workspace is registered.
+   */
+  private scheduleInterruptedAgentRunRecovery(projectOSRoot: string): void {
+    const run = () => {
+      try {
+        const recoveredRuns = reconcileInterruptedAgentRuns(projectOSRoot);
+        let legacyTerminalCount = 0;
+        for (const note of recoveredRuns) {
+          if (
+            !note.corruptLines?.length &&
+            !note.legacyNormalizedLines?.length &&
+            !note.snapshotUpdateFailed
+          ) {
+            continue;
+          }
+          if (note.corruptLines?.length || note.snapshotUpdateFailed) {
+            console.warn(
+              "[projectos] agent run recovery skipped unreadable log lines",
+              {
+                runId: note.runId,
+                lines: note.corruptLines ?? [],
+                snapshotUpdateFailed: note.snapshotUpdateFailed === true,
+                alreadyTerminal: note.alreadyTerminal === true,
+              },
+            );
+          }
+          if (
+            note.legacyNormalizedLines?.length &&
+            note.alreadyTerminal &&
+            !note.corruptLines?.length
+          ) {
+            legacyTerminalCount += 1;
+            continue;
+          }
+          if (note.legacyNormalizedLines?.length) {
+            console.info(
+              "[projectos] agent run recovery kept legacy model_request lines",
+              {
+                runId: note.runId,
+                lines: note.legacyNormalizedLines,
+                alreadyTerminal: note.alreadyTerminal === true,
+              },
+            );
+          }
+        }
+        if (legacyTerminalCount > 0) {
+          console.info(
+            `[projectos] agent run recovery: ${legacyTerminalCount} terminal log(s) kept legacy model_request lines`,
+          );
+        }
+      } catch (error) {
+        console.warn("[projectos] deferred agent run recovery failed", error);
+      }
+    };
+    if (typeof setImmediate === "function") {
+      setImmediate(run);
+      return;
+    }
+    void Promise.resolve().then(run);
+  }
+
   async openWorkspace(path: string): Promise<ProjectOSProject> {
     ensureWorkspaceBootstrapped(path);
     let workspace = this.workspaceStore.loadWorkspace(path);
@@ -1350,31 +1418,9 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     if (!workspace.workspaceRoot.startsWith("mock://")) {
       seedProjectSkills(workspace.workspaceRoot);
       refreshProjectStencilOverlay(workspace.workspaceRoot);
-      const recoveredRuns = reconcileInterruptedAgentRuns(workspace.projectOSRoot);
-      for (const note of recoveredRuns) {
-        if (
-          !note.corruptLines?.length &&
-          !note.legacyNormalizedLines?.length &&
-          !note.snapshotUpdateFailed
-        ) {
-          continue;
-        }
-        if (note.corruptLines?.length || note.snapshotUpdateFailed) {
-          console.warn("[projectos] agent run recovery skipped unreadable log lines", {
-            runId: note.runId,
-            lines: note.corruptLines ?? [],
-            snapshotUpdateFailed: note.snapshotUpdateFailed === true,
-            alreadyTerminal: note.alreadyTerminal === true,
-          });
-        }
-        if (note.legacyNormalizedLines?.length) {
-          console.info("[projectos] agent run recovery kept legacy model_request lines", {
-            runId: note.runId,
-            lines: note.legacyNormalizedLines,
-            alreadyTerminal: note.alreadyTerminal === true,
-          });
-        }
-      }
+      // Do not block workspace open on scanning every agent-runs/*.jsonl —
+      // large history dirs were keeping the welcome screen stuck on loading.
+      this.scheduleInterruptedAgentRunRecovery(workspace.projectOSRoot);
     }
     if (this.workspacesByProjectId.size > 0) {
       if (this.workspacesByProjectId.has(projectId)) {
@@ -1976,11 +2022,20 @@ export class ProjectOSLocalApi implements ProjectOSApi {
     });
     let listed = listGitBranches(workspace.workspaceRoot);
     if (accessToken) {
-      const remote = await listGithubRemoteBranchNames(workspace.workspaceRoot, {
-        accessToken,
-      });
-      if (remote.available) {
-        listed = mergeRemoteApiBranches(listed, remote.branches);
+      try {
+        const remote = await listGithubRemoteBranchNames(workspace.workspaceRoot, {
+          accessToken,
+        });
+        if (remote.available) {
+          listed = mergeRemoteApiBranches(listed, remote.branches);
+        }
+      } catch (error) {
+        // Local refs are enough to open Git Graph — never fail the IPC on
+        // GitHub connect timeouts / offline networks.
+        console.warn(
+          "[projectos] GitHub remote branch list failed; using local refs",
+          error instanceof Error ? error.message : error,
+        );
       }
     }
     return {
@@ -9270,6 +9325,22 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         });
       },
       allowConcurrentLoopRuns,
+      pushAppNotification: (input) => {
+        const bridge = getLoopNotifyBridge();
+        if (bridge) {
+          bridge(input);
+          return;
+        }
+        // Headless / tests: no-op success (fire-and-forget still advances).
+      },
+      startLabVerification: (input) => {
+        const bridge = getLoopLabVerifyBridge();
+        if (bridge) return bridge(input);
+        return {
+          ok: true,
+          message: "Lab verification bridge unset — headless accept",
+        };
+      },
       startAgentRun: (input) => {
         if (
           !allowConcurrentLoopRuns &&
@@ -9591,10 +9662,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
        * skipPreflight:true is ignored (never a production bypass).
        */
       skipPreflight?: boolean;
+      /** When true, skip schedule arming and start immediately. */
+      forceImmediate?: boolean;
     },
   ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
     const workspace = this.requireLoadedWorkspace(projectId);
     const { startLoopInstance } = await import("./loop-runtime-service.js");
+    const {
+      armLoopScheduleIfNeeded,
+    } = await import("./loop-schedule-service.js");
     const version = specVersion?.trim() || undefined;
     const selectedFeatureNodeId = featureNodeId?.trim() || undefined;
     const doc = getLoopGraph(workspace.workspaceRoot, loopId);
@@ -9602,6 +9678,15 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       ? doc?.approvedSpecs.find((item) => item.version === version)
       : doc?.approvedSpecs[doc.approvedSpecs.length - 1];
     try {
+      if (!options?.forceImmediate) {
+        const armed = armLoopScheduleIfNeeded(workspace.workspaceRoot, loopId);
+        if (armed.kind === "error") {
+          throw new Error(armed.reason);
+        }
+        if (armed.kind === "armed") {
+          return armed.document;
+        }
+      }
       // Production project entry: preflight + runBinding snapshot (definition edits
       // cannot rewrite the instance binding after start).
       const started = startLoopInstance(workspace.workspaceRoot, loopId, {
@@ -9623,6 +9708,33 @@ export class ProjectOSLocalApi implements ProjectOSApi {
         error instanceof Error ? error.message : "Failed to start loop instance",
       );
     }
+  }
+
+  async fireDueLoopSchedules(
+    projectId: string,
+    loopId: string,
+  ): Promise<{
+    document: import("../contracts/loop-graph.js").LoopGraphDocument;
+    fired: string[];
+  }> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { fireDueLoopSchedules } = await import("./loop-schedule-service.js");
+    const doc = getLoopGraph(workspace.workspaceRoot, loopId);
+    const spec = doc?.approvedSpecs[doc.approvedSpecs.length - 1];
+    const result = fireDueLoopSchedules(workspace.workspaceRoot, loopId, {
+      projectId,
+      requirePreflight: true,
+      execution: this.loopExecutionHooks(workspace, undefined, {
+        allowConcurrentLoopRuns: spec?.parallelMode === "multi_run",
+      }),
+    });
+    if (result.fired.length === 0) return result;
+    const settled = await this.settleLoopRuns(
+      workspace,
+      loopId,
+      result.document,
+    );
+    return { document: settled, fired: result.fired };
   }
 
   async startLoopInstanceWithParams(
@@ -9937,6 +10049,45 @@ export class ProjectOSLocalApi implements ProjectOSApi {
       this.loopHooksFor(workspace, loopId, instanceId),
     );
     return this.settleLoopRuns(workspace, loopId, resolved);
+  }
+
+  async patchLoopDutyProgress(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      itemId: string;
+      status: import("../contracts/loop-graph.js").LoopDutyItemStatus;
+    },
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { patchLoopDutyProgress } = await import("./loop-runtime-service.js");
+    return patchLoopDutyProgress(
+      workspace.workspaceRoot,
+      loopId,
+      instanceId,
+      input,
+    );
+  }
+
+  async mutateLoopDutyChecklist(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      mutate: import("../contracts/loop-graph.js").LoopDutyChecklistMutateOp;
+    },
+  ): Promise<import("../contracts/loop-graph.js").LoopGraphDocument> {
+    const workspace = this.requireLoadedWorkspace(projectId);
+    const { mutateLoopDutyChecklist } = await import("./loop-runtime-service.js");
+    return mutateLoopDutyChecklist(
+      workspace.workspaceRoot,
+      loopId,
+      instanceId,
+      input,
+    );
   }
 
   async getLoopInstanceEvents(

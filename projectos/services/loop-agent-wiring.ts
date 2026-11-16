@@ -204,17 +204,44 @@ function patchFromProvides(
     } else if (port === "memory") {
       memoryMode = ref.memoryMode ?? memoryMode;
     } else if (
-      (port === "skill" || port === "capability") &&
-      source.satelliteKind === "skill" &&
-      ref.skillId
+      port === "skill" ||
+      port === "mcp" ||
+      port === "capability"
     ) {
-      skillIds.push(ref.skillId);
-    } else if (
-      (port === "mcp" || port === "capability") &&
-      source.satelliteKind === "mcp" &&
-      ref.mcpServerId
-    ) {
-      mcpServerIds.push(ref.mcpServerId);
+      if (
+        (port === "skill" || port === "capability") &&
+        source.satelliteKind === "skill" &&
+        ref.skillId
+      ) {
+        skillIds.push(ref.skillId);
+      }
+      if (
+        (port === "skill" || port === "capability") &&
+        source.satelliteKind === "skill_list"
+      ) {
+        for (const member of ref.wiringListMembers ?? []) {
+          if (member.kind === "skill" && member.configRef?.skillId) {
+            skillIds.push(member.configRef.skillId);
+          }
+        }
+      }
+      if (
+        (port === "mcp" || port === "capability") &&
+        source.satelliteKind === "mcp" &&
+        ref.mcpServerId
+      ) {
+        mcpServerIds.push(ref.mcpServerId);
+      }
+      if (
+        (port === "mcp" || port === "capability") &&
+        source.satelliteKind === "mcp_list"
+      ) {
+        for (const member of ref.wiringListMembers ?? []) {
+          if (member.kind === "mcp" && member.configRef?.mcpServerId) {
+            mcpServerIds.push(member.configRef.mcpServerId);
+          }
+        }
+      }
     }
   }
 

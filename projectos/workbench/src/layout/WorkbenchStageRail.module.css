@@ -1,6 +1,7 @@
 /*
  * Zero-height flex sentinel: never compresses graph / sidebars.
- * The hit strip + button stack float centered and overlay content.
+ * The hit strip + button stack float centered and overlay the center only —
+ * never full-bleed, or left/right side-panel chrome (X / + / history) is stolen.
  */
 .host {
   position: relative;
@@ -17,21 +18,64 @@
   top: 0;
   left: 50%;
   transform: translateX(-50%);
-  /* Wider than the toolbar peep — generous horizontal hit pad. */
+  /* Centered hot zone — wide enough to find, narrow enough to spare side panels. */
   width: max(min(560px, calc(100vw - 48px)), max-content);
   max-width: calc(100vw - 24px);
-  /* Collapsed hit strip: tall enough to catch the pointer without needing precision. */
-  height: 36px;
+  height: 40px;
   overflow: hidden;
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: flex-start;
+  padding-top: 4px;
+  box-sizing: border-box;
   pointer-events: auto;
+  -webkit-app-region: no-drag;
 }
 
 .host.revealed .float {
   height: auto;
   overflow: visible;
+}
+
+/*
+ * The desktop title bar above is a native drag region: the DOM gets no pointer
+ * events there, so the pointer at the top edge could never reveal the rail.
+ * A narrow no-drag strip over the title bar center catches it; the rest of the
+ * title bar stays draggable.
+ */
+.reach {
+  position: absolute;
+  top: calc(-1 * var(--titlebar-height, 28px));
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(240px, calc(100vw - 48px));
+  height: var(--titlebar-height, 28px);
+  pointer-events: auto;
+  -webkit-app-region: no-drag;
+}
+
+/* Always-visible Stage Manager peep (matches composer dock affordance). */
+.peep {
+  flex-shrink: 0;
+  width: 40px;
+  height: 4px;
+  margin: 0 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tech-text-muted) 45%, transparent);
+  opacity: 0.55;
+  pointer-events: none;
+  transition:
+    width 180ms var(--ease-out, ease-out),
+    background 180ms var(--ease-out, ease-out),
+    opacity 180ms var(--ease-out, ease-out);
+}
+
+.host.revealed .peep,
+.float:hover .peep {
+  width: 52px;
+  opacity: 0.9;
+  background: color-mix(in srgb, var(--tech-accent) 55%, var(--tech-text-muted));
 }
 
 .stack {
@@ -51,7 +95,7 @@
   border-top: none;
   background: var(--tech-bg-side-panel, var(--color-bg-side-panel));
   box-shadow: var(--tech-shadow-md, none);
-  transform: translateY(calc(-100% + 5px));
+  transform: translateY(calc(-100% + 6px));
   opacity: 0;
   pointer-events: none;
   transition:
@@ -104,7 +148,8 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .stack {
+  .stack,
+  .peep {
     transition: none;
   }
 }

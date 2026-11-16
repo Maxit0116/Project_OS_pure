@@ -39,6 +39,7 @@ describe("loop authoring provider path (loopback)", () => {
     expect(prompt).toMatch(/RESPONSE_SCHEMA/);
     expect(prompt).toMatch(/NODE_FIELDS/);
     expect(prompt).toMatch(/node_patch/);
+    expect(prompt).toMatch(/dutyItems/);
     expect(prompt).toMatch(/actionIntegration/);
     expect(prompt).toMatch(/gmail/);
     expect(prompt).toMatch(/api=/);

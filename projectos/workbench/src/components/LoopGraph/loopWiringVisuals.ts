@@ -20,6 +20,7 @@ import {
   configPortForSatelliteKind,
   effectiveConfigPort,
   estimateWorkGroupMemberChipSize,
+  hasDutyAssignment,
   isConfigNode,
   LOOP_WORK_GROUP_MEMBER_CHIP_H,
   LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W,
@@ -31,6 +32,11 @@ import {
   LOOP_DIAMOND_NODE_H,
   LOOP_DIAMOND_NODE_W,
 } from './loopDiamondGeometry'
+import {
+  estimateWiringListCardSize,
+  isWiringListKind,
+  wiringListMembersOf,
+} from '../../../../services/loop-wiring-list'
 
 export { LOOP_DIAMOND_NODE_H, LOOP_DIAMOND_NODE_W }
 
@@ -45,9 +51,14 @@ export const LOOP_SATELLITE_MAX_DISTANCE = 280
 /** Minimum gap between agent bottom edge and satellite top edge. */
 export const LOOP_SATELLITE_BELOW_GAP = 20
 
-/** Compact Agent duty body (icon + title + 2-line task). */
-export const LOOP_AGENT_DUTY_BODY_H = 64
-/** Icon-button strip above bottom-edge config ports. */
+/**
+ * Compact Agent duty body (pad + icon row + 2-line task + flex gaps).
+ * Must fit real `.nodeAgentWired` content so N/E/S/W ports sit on the
+ * outer border — if this is too short, min-content grows past the AABB and
+ * the south port looks inset.
+ */
+export const LOOP_AGENT_DUTY_BODY_H = 74
+/** Icon-button strip height (matches `.wiringStrip`; top margin lives in body). */
 export const LOOP_AGENT_WIRING_STRIP_H = 36
 /**
  * Horizontal padding on `.nodeAgentWired` (must match CSS).
@@ -63,14 +74,14 @@ export const LOOP_DUTY_NODE_W = 200
 export const LOOP_DUTY_NODE_H = 88
 
 /**
- * Work-group member chip: icon + title only (no duty card / wiring strip).
+ * Work-group member card: icon + title + duty checklist (no wiring strip).
  * Keep in sync with `.nodeWorkGroupMember` in LoopGraphOverlay.module.css.
  */
 export const LOOP_WORK_GROUP_MEMBER_H = LOOP_WORK_GROUP_MEMBER_CHIP_H
 export const LOOP_WORK_GROUP_MEMBER_MIN_W = LOOP_WORK_GROUP_MEMBER_CHIP_MIN_W
 export const LOOP_WORK_GROUP_MEMBER_MAX_W = LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W
 /** Vertical pitch when placing a talent squad into a new work group. */
-export const LOOP_WORK_GROUP_MEMBER_STACK_GAP = 10
+export const LOOP_WORK_GROUP_MEMBER_STACK_GAP = 12
 
 /** True when an Agent is currently nested inside a work-group frame. */
 export function isWorkGroupMemberAgent(node: IntentGraphNode): boolean {
@@ -81,12 +92,23 @@ export function isWorkGroupMemberAgent(node: IntentGraphNode): boolean {
   )
 }
 
-/** AABB for a work-group member chip (icon + ellipsized title). */
+/** AABB for a work-group member duty card (no wiring strip). */
 export function workGroupMemberBoxSize(node: IntentGraphNode): {
   width: number
   height: number
 } {
-  return estimateWorkGroupMemberChipSize(node.title || 'Agent')
+  const dutyItemCount = node.dutyItems?.length ?? 0
+  const showIncomplete = !(
+    hasDutyAssignment(node) ||
+    dutyItemCount > 0 ||
+    Boolean(node.prompt?.trim())
+  )
+  return estimateWorkGroupMemberChipSize({
+    title: node.title || 'Agent',
+    prompt: node.prompt,
+    dutyItemCount,
+    showIncomplete,
+  })
 }
 
 /**
@@ -143,8 +165,10 @@ const SATELLITE_ICONS: Record<LoopSatelliteKind, LucideIcon> = {
   memory: Brain,
   skill: Puzzle,
   mcp: Server,
+  mcp_list: Server,
   rules: BookMarked,
   pack: Package,
+  skill_list: Puzzle,
 }
 
 const ZONE_ORDER: LoopAgentWiringStripPort[] = ['model', 'mcp', 'skill']
@@ -365,7 +389,13 @@ export function clearAgentSouthCorridorPatches(
     const sat = byId.get(edge.source)
     if (!sat || !isConfigNode(sat)) continue
     const port = effectiveConfigPort(edge.configPort, sat.satelliteKind)
-    if (port !== 'mcp' && sat.satelliteKind !== 'mcp') continue
+    if (
+      port !== 'mcp' &&
+      sat.satelliteKind !== 'mcp' &&
+      sat.satelliteKind !== 'mcp_list'
+    ) {
+      continue
+    }
 
     const preferred =
       layout.groups.find((group) => group.port === 'mcp')?.buttonX ??
@@ -439,21 +469,13 @@ function zoneGeometry(width: number): Record<
   return result
 }
 
-/** Evenly place N points inside a zone, each centered in its sub-slot. */
-function slotXsInZone(
-  zoneStart: number,
-  zoneWidth: number,
-  count: number,
-): number[] {
-  const n = Math.max(1, count)
-  const inset = Math.min(10, zoneWidth * 0.12)
-  const usable = Math.max(1, zoneWidth - inset * 2)
-  return Array.from({ length: n }, (_, index) => {
-    return zoneStart + inset + (usable * (index + 0.5)) / n
-  })
-}
-
-/** Build bottom-border slots + icon-button group centers for an Agent. */
+/**
+ * Build bottom-border slots + icon-button group centers for an Agent.
+ *
+ * Every provides edge / config handle for a port attaches at that port's
+ * icon `buttonX` — never fanned across the zone. Multiple satellites of the
+ * same port share one icon-aligned attach point on the agent bottom border.
+ */
 export function buildAgentWiringLayout(
   agent: IntentGraphNode,
   draft: { nodes: IntentGraphNode[]; edges: IntentGraphEdge[] },
@@ -487,14 +509,15 @@ export function buildAgentWiringLayout(
     const zone = zones[port]
     const openOrSats: Array<IntentGraphNode | null> =
       sats.length === 0 ? [null] : sats
-    const xs = slotXsInZone(zone.start, zone.width, openOrSats.length)
+    // Icon-aligned attach X shared by every satellite of this port.
+    const attachX = zone.center
     const slotIndexes: number[] = []
-    openOrSats.forEach((sat, index) => {
+    openOrSats.forEach((sat) => {
       slotIndexes.push(slots.length)
       slots.push({
         key: sat ? `${port}:${sat.id}` : `${port}:open`,
         port,
-        x: xs[index]!,
+        x: attachX,
         ...(sat ? { satelliteId: sat.id } : {}),
       })
     })
@@ -540,6 +563,9 @@ export function nodeBoxSize(
   },
 ): { width: number; height: number } {
   if (isConfigNode(node)) {
+    if (isWiringListKind(node.satelliteKind)) {
+      return estimateWiringListCardSize(wiringListMembersOf(node).length)
+    }
     return { width: LOOP_CONFIG_NODE_W, height: LOOP_CONFIG_NODE_H }
   }
   if (isDiamondLoopNode(node)) {
@@ -590,51 +616,27 @@ export function workflowPortBoxSize(
   return nodeBoxSize(node, draft, options)
 }
 
-/** Local offset of a strip config port (relative to node top-left / padding edge). */
+/**
+ * Local offset of a strip config port (relative to node top-left / padding edge).
+ * Always the icon-button center on the bottom border — every satellite of this
+ * port shares that single attach point (`satelliteId` is kept for callers).
+ */
 export function wiringPortOffset(
   port: LoopAgentConfigPort,
   width = LOOP_AGENT_NODE_MIN_W,
   layout?: AgentWiringLayout,
-  satelliteId?: string,
+  _satelliteId?: string,
 ): { x: number; y: number } {
   if (layout) {
     const key = (port === 'mcp' || port === 'skill' || port === 'model'
       ? port
       : 'model') as LoopAgentWiringStripPort
     const group = layout.groups.find((item) => item.port === key)
-    const groupSlots = group
-      ? group.slotIndexes
-          .map((index) => layout.slots[index])
-          .filter((slot): slot is AgentWiringSlot => Boolean(slot))
-      : []
-
-    // Single icon → always attach on the icon center (buttonX), not a
-    // sub-slot that could drift if zone insets change.
-    if (group && groupSlots.length <= 1) {
+    if (group) {
       return {
         x: group.buttonX,
         y: layout.height,
       }
-    }
-
-    let resolved = -1
-    if (satelliteId) {
-      resolved = layout.slots.findIndex(
-        (slot) => slot.satelliteId === satelliteId,
-      )
-    }
-    if (resolved < 0) {
-      resolved = layout.slots.findIndex(
-        (slot) => slot.port === port && !slot.satelliteId,
-      )
-    }
-    if (resolved < 0) {
-      resolved = layout.slots.findIndex((slot) => slot.port === port)
-    }
-    if (resolved >= 0) return slotLocalPoint(layout, resolved)
-
-    if (group) {
-      return { x: group.buttonX, y: layout.height }
     }
   }
   const zones = zoneGeometry(width)

@@ -8,14 +8,29 @@ import {
 } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  areRequiredDutiesComplete,
+  computeLoopLayerFrameBounds,
   computeLoopWorkGroupFrameBounds,
   defaultEmptyLoopWorkGroupFrame,
+  hasDutyAssignment,
   isConfigNode,
   isIntentGraphReadyForCompile,
+  getLoopDepartmentTemplate,
+  isLoopDepartmentPaletteItem,
+  resolveLoopWorkGroupTaskTitle,
   isWorkGroupEndpoint,
   isNestedWorkGroupInteriorNode,
   isWorkGroupSurfaceAgent,
   listWorkGroupSurfaceAgentIds,
+  LOOP_PALETTE_ITEMS,
+  LOOP_WORK_GROUP_PORTS,
+  listStaffableCuratedPaletteIds,
+  loopWorkGroupPortWorld,
+  normalizeLoopWorkGroupPort,
+  normalizeMarqueeRect,
+  oppositeLoopWorkGroupPort,
+  pickNodesInMarquee,
+  resizeRectFromEdge,
   sessionGraphShieldCssInsets,
   type AgentDefinition,
   type IntentEdgePort,
@@ -23,6 +38,8 @@ import {
   type IntentGraphEdge,
   type IntentGraphNode,
   type LoopAgentConfigPort,
+  type LoopLayerRect,
+  type LoopLayerResizeEdge,
   type LoopSatelliteKind,
   type LoopWorkGroup,
   type LoopWorkGroupCollaborationMode,
@@ -59,9 +76,21 @@ import LoopGraphContextMenu, {
 import LoopConfigAssetPicker, {
   type ConfigAssetPick,
 } from './LoopConfigAssetPicker'
+import LoopWiringListPopover from './LoopWiringListPopover'
+import {
+  connectedWiringAssetIds,
+  findWiringListForAgent,
+  isWiringListKind,
+  LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+  wiringListMembersOf,
+} from '../../../../services/loop-wiring-list'
+import { newLoopEntityId } from '../../state/loopAuthoring'
 import LoopGraphPalette from './LoopGraphPalette'
 import LoopNodeDutyCard from './LoopNodeDutyCard'
+import LoopNodeDutyChecklist from './LoopNodeDutyChecklist'
 import LoopWorkGroupFrame from './LoopWorkGroupFrame'
+import LoopLayerFrame from './LoopLayerFrame'
+import layerStyles from './LoopLayerFrame.module.css'
 import LoopGraphRail from './LoopGraphRail'
 import LoopRunSidePanel from './LoopRunSidePanel'
 import LoopRunMaterialsPanel from './LoopRunMaterialsPanel'
@@ -97,7 +126,6 @@ import {
   parkSatelliteLocalX,
   resolveProvidesPort,
   satelliteIcon,
-  slotLocalPoint,
   workflowPortBoxSize,
   workflowPortsForNode,
 } from './loopWiringVisuals'
@@ -124,12 +152,38 @@ import {
   portPoint,
   formatEdgeLabel,
   routeLoopEdge,
+  routeLoopEdgePreview,
   routeProvidesCurve,
   snapGraphNodePosition,
 } from './loopEdgeRouting'
 import { loopNodePortSlots } from './loopPortAssignment'
 import { routeAllLoopWorkflowEdges } from './loopEdgeBatchRouting'
+import {
+  DECISION_BRANCH_LABEL_T,
+  decisionBranchLabelPoint,
+  decisionBranchPatchForPort,
+  isDecisionBranchSourceNode,
+  isStockDecisionBranchLabel,
+  pointAlongPolyline,
+  resolveDecisionBranchDisplayLabel,
+  decisionBranchLabelKeyFromBranchKey,
+  type DecisionBranchLabelKey,
+} from './loopDecisionBranch'
+import {
+  clientToWorldPoint,
+  formatWorldTransform,
+  rectIntersectsWorldView,
+  visibleWorldRect,
+  type LoopGraphViewport,
+} from './loopGraphViewport'
+import {
+  setGeometryChromeDimmed,
+  setWorldDomPositions,
+  setWorldWorkGroupDomPosition,
+} from './loopGraphDragDom'
 import styles from './LoopGraphOverlay.module.css'
+
+const DEFAULT_VIEWPORT: LoopGraphViewport = { x: 32, y: 32, scale: 1 }
 
 const NODE_W = LOOP_NODE_W
 const NODE_H = LOOP_NODE_H
@@ -169,6 +223,8 @@ export default function LoopGraphOverlay() {
   const setNodeAgentDefinition = useLoopGraphStore((s) => s.setNodeAgentDefinition)
   const beginAuthorConfigSatellite = useLoopGraphStore((s) => s.beginAuthorConfigSatellite)
   const updateConfigSatellite = useLoopGraphStore((s) => s.updateConfigSatellite)
+  const appendWiringListMember = useLoopGraphStore((s) => s.appendWiringListMember)
+  const removeWiringListMember = useLoopGraphStore((s) => s.removeWiringListMember)
   const applyWiringToAgentDefinition = useLoopGraphStore((s) => s.applyWiringToAgentDefinition)
   const saveWiringAsNewAgent = useLoopGraphStore((s) => s.saveWiringAsNewAgent)
   const settings = useWorkbenchStore((s) => s.settings)
@@ -186,22 +242,46 @@ export default function LoopGraphOverlay() {
   const resumeRun = useLoopGraphStore((s) => s.resumeRun)
   const advanceRun = useLoopGraphStore((s) => s.advanceRun)
   const resolveHitl = useLoopGraphStore((s) => s.resolveHitl)
+  const patchDutyProgress = useLoopGraphStore((s) => s.patchDutyProgress)
+  const mutateDutyChecklist = useLoopGraphStore((s) => s.mutateDutyChecklist)
   const runHistory = useLoopGraphStore((s) => s.runHistory)
   const refreshRunHistory = useLoopGraphStore((s) => s.refreshRunHistory)
   const linkActiveSession = useLoopGraphStore((s) => s.linkActiveSession)
   const setCanvasSelectedNodeId = useLoopGraphStore((s) => s.setCanvasSelectedNodeId)
   const selectedWorkGroupId = useLoopGraphStore((s) => s.selectedWorkGroupId)
   const setSelectedWorkGroupId = useLoopGraphStore((s) => s.setSelectedWorkGroupId)
+  const selectedLayerId = useLoopGraphStore((s) => s.selectedLayerId)
+  const setSelectedLayerId = useLoopGraphStore((s) => s.setSelectedLayerId)
+  const createLayerFromMembers = useLoopGraphStore((s) => s.createLayerFromMembers)
+  const renameLayer = useLoopGraphStore((s) => s.renameLayer)
+  const setLayerColor = useLoopGraphStore((s) => s.setLayerColor)
+  const setLayerMembers = useLoopGraphStore((s) => s.setLayerMembers)
+  const dissolveLayer = useLoopGraphStore((s) => s.dissolveLayer)
   const renameWorkGroup = useLoopGraphStore((s) => s.renameWorkGroup)
+  const pendingWorkGroupTaskEditId = useLoopGraphStore(
+    (s) => s.pendingWorkGroupTaskEditId,
+  )
+  const requestWorkGroupTaskEdit = useLoopGraphStore(
+    (s) => s.requestWorkGroupTaskEdit,
+  )
   const updateWorkGroup = useLoopGraphStore((s) => s.updateWorkGroup)
+  const proposeWorkGroupStaffing = useLoopGraphStore(
+    (s) => s.proposeWorkGroupStaffing,
+  )
+  const confirmWorkGroupStaffingProposal = useLoopGraphStore(
+    (s) => s.confirmWorkGroupStaffingProposal,
+  )
+  const dismissWorkGroupStaffingProposal = useLoopGraphStore(
+    (s) => s.dismissWorkGroupStaffingProposal,
+  )
   const addNodeToWorkGroup = useLoopGraphStore((s) => s.addNodeToWorkGroup)
+  const reflowWorkGroupSurfaceLayout = useLoopGraphStore(
+    (s) => s.reflowWorkGroupSurfaceLayout,
+  )
   const focusedWorkGroupId = useLoopGraphStore((s) => s.focusedWorkGroupId)
   const enterWorkGroupGraph = useLoopGraphStore((s) => s.enterWorkGroupGraph)
   const exitWorkGroupGraph = useLoopGraphStore((s) => s.exitWorkGroupGraph)
   const removeNodeFromWorkGroup = useLoopGraphStore((s) => s.removeNodeFromWorkGroup)
-  const reflowWorkGroupSurfaceLayout = useLoopGraphStore(
-    (s) => s.reflowWorkGroupSurfaceLayout,
-  )
   const layoutDraftSemantically = useLoopGraphStore(
     (s) => s.layoutDraftSemantically,
   )
@@ -211,10 +291,20 @@ export default function LoopGraphOverlay() {
   const clearAuthoringFocus = useLoopGraphStore((s) => s.clearAuthoringFocus)
   const canvasSelectedEdgeId = useLoopGraphStore((s) => s.canvasSelectedEdgeId)
 
-  const [viewport, setViewport] = useState({ x: 32, y: 32, scale: 1 })
+  const [viewport, setViewport] = useState<LoopGraphViewport>(DEFAULT_VIEWPORT)
+  /** Always mirrors the live camera — including mid-pan DOM-only updates. */
+  const viewportRef = useRef<LoopGraphViewport>(DEFAULT_VIEWPORT)
+  const worldRef = useRef<HTMLDivElement | null>(null)
   const [canvasSize, setCanvasSize] = useState({ width: 800, height: 600 })
+  const [staffingReason, setStaffingReason] = useState('')
+  const [staffingPaletteId, setStaffingPaletteId] = useState('')
   const [diamondBoxes, setDiamondBoxes] = useState<Record<string, DiamondBox>>(
     {},
+  )
+  const staffablePaletteIds = useMemo(
+    () =>
+      listStaffableCuratedPaletteIds(LOOP_PALETTE_ITEMS.map((item) => item.id)),
+    [],
   )
   // L2 interior uses full Loops Graph cards; L1 surface keeps compact chips.
   const sizeOpts = useMemo(
@@ -279,7 +369,10 @@ export default function LoopGraphOverlay() {
   const setSelectedNodeId = (nodeId: string | null) => {
     setSelectedNodeIdState(nodeId)
     setCanvasSelectedNodeId(nodeId)
-    if (nodeId) setSelectedWorkGroupId(null)
+    if (nodeId) {
+      setSelectedWorkGroupId(null)
+      setSelectedLayerId(null)
+    }
     if (!nodeId) clearAuthoringFocus()
   }
   const selectWorkGroup = (workGroupId: string | null) => {
@@ -287,10 +380,56 @@ export default function LoopGraphOverlay() {
     if (workGroupId) {
       setSelectedNodeIdState(null)
       setCanvasSelectedNodeId(null)
+      setSelectedLayerId(null)
       clearAuthoringFocus()
       // Do NOT reflow here — frame size only changes on confirmed join/leave.
     }
   }
+
+  const selectLayer = (layerId: string | null) => {
+    setSelectedLayerId(layerId)
+    if (layerId) {
+      setSelectedNodeIdState(null)
+      setCanvasSelectedNodeId(null)
+      setSelectedWorkGroupId(null)
+      clearAuthoringFocus()
+    }
+  }
+
+  const [layerMarqueeArmed, setLayerMarqueeArmed] = useState(false)
+  const [layerMarqueeRect, setLayerMarqueeRect] = useState<LoopLayerRect | null>(
+    null,
+  )
+  const layerGestureRef = useRef<
+    | null
+    | { kind: 'create'; x0: number; y0: number }
+    | {
+        kind: 'resize'
+        layerId: string
+        edge: LoopLayerResizeEdge
+        base: LoopLayerRect
+      }
+  >(null)
+
+  const cancelLayerGesture = useCallback(() => {
+    layerGestureRef.current = null
+    setLayerMarqueeRect(null)
+    setLayerMarqueeArmed(false)
+  }, [])
+
+  const armCreateStageLayer = useCallback(() => {
+    layerGestureRef.current = null
+    setLayerMarqueeRect(null)
+    setLayerMarqueeArmed(true)
+    setSelectedWorkGroupId(null)
+    setSelectedLayerId(null)
+    pushToast({
+      type: 'info',
+      message: ts('chat.loopGraph.layer.createHint'),
+      autoDismiss: 4200,
+    })
+  }, [pushToast, setSelectedLayerId, setSelectedWorkGroupId, ts])
+
   const railLayoutRef = useRef(railLayout)
   railLayoutRef.current = railLayout
   const [acceptedAssumptions, setAcceptedAssumptions] = useState<Record<string, boolean>>({})
@@ -316,6 +455,11 @@ export default function LoopGraphOverlay() {
     kind: Extract<LoopSatelliteKind, 'model' | 'skill' | 'mcp'>
     anchor: { x: number; y: number }
   } | null>(null)
+  const [wiringListPopover, setWiringListPopover] = useState<{
+    listNodeId: string
+    kind: 'mcp' | 'skill'
+    anchor: { x: number; y: number }
+  } | null>(null)
 
   useEffect(() => {
     if (wiringViewMode !== 'compact' || !document) return
@@ -339,11 +483,64 @@ export default function LoopGraphOverlay() {
     }
   }, [phase, focusedWorkGroupId, exitWorkGroupGraph])
 
+  const commitViewport = useCallback((next: LoopGraphViewport) => {
+    viewportRef.current = next
+    if (worldRef.current) {
+      worldRef.current.style.transform = formatWorldTransform(next)
+    }
+    setViewport(next)
+  }, [])
+
+  const applyViewportDom = useCallback((next: LoopGraphViewport) => {
+    viewportRef.current = next
+    if (worldRef.current) {
+      worldRef.current.style.transform = formatWorldTransform(next)
+    }
+  }, [])
+
   // L2 starts at a readable origin after interior layout — reset pan/zoom.
   useEffect(() => {
     if (!focusedWorkGroupId) return
-    setViewport({ x: 32, y: 32, scale: 1 })
-  }, [focusedWorkGroupId])
+    commitViewport(DEFAULT_VIEWPORT)
+  }, [focusedWorkGroupId, commitViewport])
+
+  // Fingerprint L1 chip content so title/prompt edits repack the matrix.
+  const workGroupChipFingerprint = useMemo(() => {
+    if (!document?.draft.workGroups?.length) return ''
+    return (document.draft.workGroups ?? [])
+      .map((group) => {
+        const surfaceIds = listWorkGroupSurfaceAgentIds(
+          group,
+          document.draft.nodes,
+        )
+        return `${group.id}:${surfaceIds
+          .map((id) => {
+            const node = document.draft.nodes.find((item) => item.id === id)
+            if (!node) return id
+            return [
+              id,
+              node.title,
+              node.prompt,
+              node.dutyItems?.length ?? 0,
+            ].join('~')
+          })
+          .join('|')}`
+      })
+      .join(';')
+  }, [document?.draft.nodes, document?.draft.workGroups])
+
+  // Repack L1 chips when the open document / chip content changes (no-op if packed).
+  useEffect(() => {
+    if (!document || focusedWorkGroupId || !workGroupChipFingerprint) return
+    for (const group of document.draft.workGroups ?? []) {
+      reflowWorkGroupSurfaceLayout(group.id)
+    }
+  }, [
+    document,
+    focusedWorkGroupId,
+    reflowWorkGroupSurfaceLayout,
+    workGroupChipFingerprint,
+  ])
 
   const canvasRef = useRef<HTMLDivElement | null>(null)
   const dragRef = useRef<{ x: number; y: number; px: number; py: number } | null>(null)
@@ -360,7 +557,22 @@ export default function LoopGraphOverlay() {
     /** Surface agent already in a work group — drag is exit-only (matrix fixed). */
     workGroupLocked?: boolean
     homeWorkGroupId?: string
+    /** Live DOM positions while dragging (store commits on pointerup). */
+    pendingById: Map<string, { x: number; y: number }>
   } | null>(null)
+  /**
+   * Work-group / department title drag: DOM-only translation mid-gesture,
+   * one `moveWorkGroup` commit on pointerup.
+   */
+  const workGroupDragRef = useRef<{
+    id: string
+    accDx: number
+    accDy: number
+    frameStart: { x: number; y: number }
+    nodeStarts: Array<{ id: string; x: number; y: number }>
+  } | null>(null)
+  const edgesLayerRef = useRef<SVGSVGElement | null>(null)
+  const branchLabelLayerRef = useRef<HTMLDivElement | null>(null)
   /**
    * While exiting a matrix chip, keep the dashed frame at the pre-drag size.
    * Size may change only after confirmed join/leave + reflow.
@@ -383,6 +595,79 @@ export default function LoopGraphOverlay() {
       pendingLabel: ts('chat.loopGraph.edgeLabelPending'),
     })
   }, [document, sizeOpts, ts])
+
+  const [editingBranchEdgeId, setEditingBranchEdgeId] = useState<string | null>(
+    null,
+  )
+  const [editingBranchDraft, setEditingBranchDraft] = useState('')
+
+  // Keep Condition / Approval branch chips aligned with the live source port.
+  // Port change → always refresh branchLabel (每次跟随). Stable port → fill gaps only.
+  useEffect(() => {
+    if (!document || phase !== 'draw') return
+    const draft = document.draft
+    const resolveLabel = (key: DecisionBranchLabelKey) =>
+      ts(`chat.loopGraph.decisionBranch.${key}`)
+    let changed = false
+    const nextEdges = draft.edges.map((edge) => {
+      if (edge.kind === 'provides') return edge
+      const source = draft.nodes.find((node) => node.id === edge.source)
+      if (!isDecisionBranchSourceNode(source)) return edge
+      const port =
+        workflowEdgeRoutes.get(edge.id)?.sourcePort ?? edge.sourcePort ?? 's'
+      const patch = decisionBranchPatchForPort(port, source, resolveLabel)
+      if (edge.sourcePort !== port) {
+        changed = true
+        return {
+          ...edge,
+          ...patch,
+          ...(patch.kind ? { kind: patch.kind } : {}),
+        }
+      }
+      let next = edge
+      let dirty = false
+      if (!edge.sourcePort) {
+        next = { ...next, sourcePort: port }
+        dirty = true
+      }
+      if (!edge.branchKey) {
+        next = { ...next, branchKey: patch.branchKey }
+        dirty = true
+      }
+      if (!edge.branchLabel?.trim()) {
+        next = { ...next, branchLabel: patch.branchLabel }
+        dirty = true
+      } else {
+        const labelKey = decisionBranchLabelKeyFromBranchKey(
+          edge.branchKey ?? patch.branchKey,
+        )
+        // Refresh stock Agree/同意 chips to the active locale without wiping custom text.
+        if (
+          labelKey &&
+          isStockDecisionBranchLabel(edge.branchLabel, labelKey) &&
+          edge.branchLabel !== patch.branchLabel
+        ) {
+          next = { ...next, branchLabel: patch.branchLabel }
+          dirty = true
+        }
+      }
+      if (
+        patch.kind === 'conditional' &&
+        (!edge.kind || edge.kind === 'depends')
+      ) {
+        next = { ...next, kind: 'conditional' }
+        dirty = true
+      }
+      if (dirty) changed = true
+      return dirty ? next : edge
+    })
+    if (!changed) return
+    updateDraft({
+      ...draft,
+      revision: draft.revision + 1,
+      edges: nextEdges,
+    })
+  }, [document, phase, ts, updateDraft, workflowEdgeRoutes])
 
   useEffect(() => {
     if (!open || !project) return
@@ -415,12 +700,36 @@ export default function LoopGraphOverlay() {
   useEffect(() => {
     if (!open) return undefined
     const onKey = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const typing =
+        target &&
+        (target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.isContentEditable)
+      if (
+        !typing &&
+        selectedLayerId &&
+        phase === 'draw' &&
+        (event.key === 'Delete' || event.key === 'Backspace')
+      ) {
+        event.preventDefault()
+        dissolveLayer(selectedLayerId)
+        return
+      }
       if (event.key === 'Escape') {
+        if (layerMarqueeArmed || layerGestureRef.current) {
+          cancelLayerGesture()
+          return
+        }
         if (connectingFromId) {
           setConnectingFrom(null)
           setPointerWorld(null)
           connectingWorkGroupPortRef.current = null
           connectingSourceSlotRef.current = null
+          return
+        }
+        if (selectedLayerId) {
+          setSelectedLayerId(null)
           return
         }
         if (selectedWorkGroupId) {
@@ -444,12 +753,18 @@ export default function LoopGraphOverlay() {
     open,
     connectingFromId,
     selectedWorkGroupId,
+    selectedLayerId,
+    layerMarqueeArmed,
     contextMenu,
     pendingDelete,
+    phase,
+    cancelLayerGesture,
+    dissolveLayer,
     setConnectingFrom,
     setPendingDelete,
     setLoopGraphOpen,
     setSelectedWorkGroupId,
+    setSelectedLayerId,
   ])
 
   useEffect(() => {
@@ -462,6 +777,14 @@ export default function LoopGraphOverlay() {
       setDutyCardNodeId(null)
     }
   }, [document, dutyCardNodeId])
+
+  useEffect(() => {
+    if (!open) return undefined
+    const tick = window.setInterval(() => {
+      void useLoopGraphStore.getState().fireDueSchedules()
+    }, 5_000)
+    return () => window.clearInterval(tick)
+  }, [open])
 
   useEffect(() => {
     if (!open) return undefined
@@ -517,8 +840,11 @@ export default function LoopGraphOverlay() {
     edges: [] as IntentGraphEdge[],
     workGroups: [] as LoopWorkGroup[],
     workGroupSeq: 0,
+    layers: [],
+    layerSeq: 0,
   }
   const workGroups = draft.workGroups ?? []
+  const layers = draft.layers ?? []
 
   const compileReady = isIntentGraphReadyForCompile(draft)
 
@@ -563,10 +889,7 @@ export default function LoopGraphOverlay() {
   const clientToWorld = (clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect()
     if (!rect) return { x: 40, y: 40 }
-    return {
-      x: (clientX - rect.left - viewport.x) / viewport.scale,
-      y: (clientY - rect.top - viewport.y) / viewport.scale,
-    }
+    return clientToWorldPoint(clientX, clientY, rect, viewportRef.current)
   }
 
   const placeFromPalette = async (
@@ -574,7 +897,10 @@ export default function LoopGraphOverlay() {
     position: { x: number; y: number },
     screenAnchor?: { x: number; y: number },
   ) => {
-    if (paletteItemId === 'workgroup.create') {
+    if (
+      paletteItemId === 'workgroup.create' ||
+      isLoopDepartmentPaletteItem(paletteItemId)
+    ) {
       const id = await beginAuthorNodeFromPalette(paletteItemId, {
         x: Math.max(16, position.x - 140),
         y: Math.max(16, position.y - 80),
@@ -643,6 +969,91 @@ export default function LoopGraphOverlay() {
     )
   }
 
+  /** L1 duty nodes only — layers stay on the main loop canvas (not L2). */
+  const layerEligibleNodeBounds = () =>
+    draft.nodes
+      .filter((node) => !isConfigNode(node))
+      .filter((node) => !isNestedWorkGroupInteriorNode(node))
+      .map((node) => {
+        const size = nodeBoxSize(node, draft, sizeOpts)
+        return {
+          id: node.id,
+          x: node.position.x,
+          y: node.position.y,
+          width: size.width,
+          height: size.height,
+        }
+      })
+
+  const layerFrameBoundsFor = (memberNodeIds: string[]): LoopLayerRect | null => {
+    const byId = new Map(
+      layerEligibleNodeBounds().map((bounds) => [bounds.id, bounds]),
+    )
+    const memberBounds = memberNodeIds
+      .map((id) => byId.get(id))
+      .filter(
+        (
+          rect,
+        ): rect is {
+          id: string
+          x: number
+          y: number
+          width: number
+          height: number
+        } => Boolean(rect),
+      )
+    return computeLoopLayerFrameBounds(memberBounds)
+  }
+
+  const commitLayerMarquee = (rect: LoopLayerRect) => {
+    const memberIds = pickNodesInMarquee(layerEligibleNodeBounds(), rect)
+    const gesture = layerGestureRef.current
+    layerGestureRef.current = null
+    setLayerMarqueeRect(null)
+    setLayerMarqueeArmed(false)
+    if (!gesture) return
+    if (gesture.kind === 'create') {
+      if (memberIds.length === 0) {
+        pushToast({
+          type: 'info',
+          message: ts('chat.loopGraph.layer.emptySelection'),
+          autoDismiss: 3600,
+        })
+        return
+      }
+      const id = createLayerFromMembers(memberIds)
+      if (id) selectLayer(id)
+      return
+    }
+    if (memberIds.length === 0) {
+      pushToast({
+        type: 'info',
+        message: ts('chat.loopGraph.layer.emptyResize'),
+        autoDismiss: 3600,
+      })
+      return
+    }
+    setLayerMembers(gesture.layerId, memberIds)
+    selectLayer(gesture.layerId)
+  }
+
+  const beginLayerResize = (
+    layerId: string,
+    edge: LoopLayerResizeEdge,
+    event: { clientX: number; clientY: number; pointerId: number },
+  ) => {
+    const layer = layers.find((item) => item.id === layerId)
+    if (!layer) return
+    const base = layerFrameBoundsFor(layer.memberNodeIds)
+    if (!base) return
+    const world = clientToWorld(event.clientX, event.clientY)
+    layerGestureRef.current = { kind: 'resize', layerId, edge, base }
+    setLayerMarqueeArmed(false)
+    setLayerMarqueeRect(resizeRectFromEdge(base, edge, world))
+    selectLayer(layerId)
+    canvasRef.current?.setPointerCapture?.(event.pointerId)
+  }
+
   const pointInFrame = (
     point: { x: number; y: number },
     bounds: LoopWorkGroupFrameBounds,
@@ -652,14 +1063,6 @@ export default function LoopGraphOverlay() {
     point.y >= bounds.y &&
     point.y <= bounds.y + bounds.height
 
-  const workGroupPortWorld = (
-    bounds: LoopWorkGroupFrameBounds,
-    port: LoopWorkGroupPort,
-  ) => ({
-    x: port === 'in' ? bounds.x : bounds.x + bounds.width,
-    y: bounds.y + bounds.height / 2,
-  })
-
   const startConnectFromWorkGroup = (
     workGroupId: string,
     port: LoopWorkGroupPort,
@@ -668,7 +1071,26 @@ export default function LoopGraphOverlay() {
     connectingWorkGroupPortRef.current = port
     connectingSourceSlotRef.current = null
     setConnectingFrom(workGroupId)
-    setPointerWorld(workGroupPortWorld(bounds, port))
+    setPointerWorld(loopWorkGroupPortWorld(bounds, port))
+  }
+
+  /** Nearest N/E/S/W attach on a work-group frame for a world-space click. */
+  const nearestWorkGroupPort = (
+    bounds: LoopWorkGroupFrameBounds,
+    world: { x: number; y: number },
+  ): LoopWorkGroupPort => {
+    let best: LoopWorkGroupPort = 'e'
+    let bestDist = Number.POSITIVE_INFINITY
+    for (const port of LOOP_WORK_GROUP_PORTS) {
+      const point = loopWorkGroupPortWorld(bounds, port)
+      const dist =
+        (point.x - world.x) ** 2 + (point.y - world.y) ** 2
+      if (dist < bestDist) {
+        bestDist = dist
+        best = port
+      }
+    }
+    return best
   }
 
   const finishConnectToWorkGroup = (
@@ -695,7 +1117,10 @@ export default function LoopGraphOverlay() {
     }
     const sourceIsWg = isWorkGroupEndpoint(connectingFromId, workGroups)
     const workGroupPort = sourceIsWg
-      ? (connectingWorkGroupPortRef.current ?? 'out')
+      ? normalizeLoopWorkGroupPort(
+          connectingWorkGroupPortRef.current,
+          'e',
+        )
       : port
     void beginAuthorEdge(connectingFromId, workGroupId, {
       workGroupPort,
@@ -704,7 +1129,7 @@ export default function LoopGraphOverlay() {
         : {
             sourcePort: connectingSourceSlotRef.current?.port,
             sourcePortIndex: connectingSourceSlotRef.current?.index ?? 0,
-            targetPort: port === 'in' ? ('w' as IntentEdgePort) : ('e' as IntentEdgePort),
+            targetPort: port as IntentEdgePort,
           }),
     }).finally(() => {
       connectingWorkGroupPortRef.current = null
@@ -726,6 +1151,26 @@ export default function LoopGraphOverlay() {
     if (!agent) return
     const port =
       asset.kind === 'model' ? 'model' : asset.kind === 'mcp' ? 'mcp' : 'skill'
+    // When a list already owns this port, append into it instead of spawning
+    // another satellite (normalize would fold it anyway).
+    if (port === 'mcp' || port === 'skill') {
+      const existingList = findWiringListForAgent(agentNodeId, port, draft)
+      if (existingList) {
+        appendWiringListMember(existingList.id, {
+          id: newLoopEntityId('node'),
+          title:
+            port === 'mcp'
+              ? `MCP · ${asset.name}`
+              : `Skill · ${asset.name}`,
+          kind: port,
+          configRef:
+            port === 'mcp'
+              ? { mcpServerId: asset.id }
+              : { skillId: asset.id },
+        })
+        return
+      }
+    }
     const layout = buildAgentWiringLayout(agent, draft)
     const stack = layout.slots.filter(
       (slot) => slot.port === port && slot.satelliteId,
@@ -809,16 +1254,21 @@ export default function LoopGraphOverlay() {
       })
       return
     }
+    const vp = viewportRef.current
     addNodeAt({
-      x: (rect.width / 2 - viewport.x) / viewport.scale,
-      y: (rect.height / 2 - viewport.y) / viewport.scale,
+      x: (rect.width / 2 - vp.x) / vp.scale,
+      y: (rect.height / 2 - vp.y) / vp.scale,
     })
   }
 
   const onWheel = (event: WheelEvent<HTMLDivElement>) => {
     event.preventDefault()
-    const nextScale = Math.min(1.8, Math.max(0.45, viewport.scale * (event.deltaY > 0 ? 0.92 : 1.08)))
-    setViewport((current) => ({ ...current, scale: nextScale }))
+    const current = viewportRef.current
+    const nextScale = Math.min(
+      1.8,
+      Math.max(0.45, current.scale * (event.deltaY > 0 ? 0.92 : 1.08)),
+    )
+    commitViewport({ ...current, scale: nextScale })
   }
 
   const workGroupBoundsById = (() => {
@@ -883,6 +1333,16 @@ export default function LoopGraphOverlay() {
 
   const canvasNodes = draft.nodes.filter(nodeVisibleOnCanvas)
 
+  const layerWorldBounds = !focusedWorkGroupId
+    ? layers
+        .map((layer) => layerFrameBoundsFor(layer.memberNodeIds))
+        .filter((bounds): bounds is LoopLayerRect => Boolean(bounds))
+    : []
+
+  // Frustum for mount culling — based on committed viewport (refreshes after pan).
+  // Plain calc (not useMemo): this block sits after `if (!open) return null`.
+  const viewRect = visibleWorldRect(viewport, canvasSize)
+
   const worldWidth = Math.max(
     800,
     ...canvasNodes.map((node) => {
@@ -890,6 +1350,8 @@ export default function LoopGraphOverlay() {
       return node.position.x + size.width + 80
     }),
     ...[...workGroupBoundsById.values()].map((bounds) => bounds.x + bounds.width + 80),
+    ...layerWorldBounds.map((bounds) => bounds.x + bounds.width + 80),
+    layerMarqueeRect ? layerMarqueeRect.x + layerMarqueeRect.width + 40 : 0,
     pointerWorld ? pointerWorld.x + 40 : 0,
   )
   const worldHeight = Math.max(
@@ -901,8 +1363,25 @@ export default function LoopGraphOverlay() {
     ...[...workGroupBoundsById.values()].map(
       (bounds) => bounds.y + bounds.height + 120,
     ),
+    ...layerWorldBounds.map((bounds) => bounds.y + bounds.height + 120),
+    layerMarqueeRect ? layerMarqueeRect.y + layerMarqueeRect.height + 40 : 0,
     pointerWorld ? pointerWorld.y + 40 : 0,
   )
+
+  const nodeInFrustum = (
+    position: { x: number; y: number },
+    size: { width: number; height: number },
+  ) =>
+    // Uses committed viewport. Mid-pan the camera can slide ahead of this
+    // frustum; pointerup commits and remounts. Avoid tying cull to `dragging`
+    // or the pan-start re-render would mount the entire graph.
+    rectIntersectsWorldView(
+      position.x,
+      position.y,
+      size.width,
+      size.height,
+      viewRect,
+    )
 
   const connectingSource = connectingFromId
     ? draft.nodes.find((node) => node.id === connectingFromId)
@@ -919,21 +1398,21 @@ export default function LoopGraphOverlay() {
             defaultEmptyLoopWorkGroupFrame(
               connectingWorkGroup.origin ?? { x: 80, y: 80 },
             )
-          const port = connectingWorkGroupPortRef.current ?? 'out'
-          const origin = workGroupPortWorld(bounds, port)
+          const port = normalizeLoopWorkGroupPort(
+            connectingWorkGroupPortRef.current,
+            'e',
+          )
+          const origin = loopWorkGroupPortWorld(bounds, port)
           const synthetic: IntentGraphNode = {
             id: connectingWorkGroup.id,
             title: connectingWorkGroup.title,
             prompt: '',
             position: { x: origin.x - 1, y: origin.y - 1 },
           }
-          return routeLoopEdge({
+          return routeLoopEdgePreview({
             source: synthetic,
             endPoint: pointerWorld,
-            sourcePort: port === 'in' ? 'w' : 'e',
-            sourceAllowedPorts: port === 'in' ? ['w'] : ['e'],
-            obstacles: draft.nodes,
-            obstacleSize: (node) => nodeBoxSize(node, draft, sizeOpts),
+            sourcePort: port,
             width: 2,
             height: 2,
           })
@@ -942,21 +1421,38 @@ export default function LoopGraphOverlay() {
         ? (() => {
             const ports = workflowPortBoxSize(connectingSource, draft, sizeOpts)
             const allowed = workflowPortsForNode(connectingSource, draft)
-            return routeLoopEdge({
+            const locked = connectingSourceSlotRef.current?.port
+            const sourcePort =
+              locked && allowed.includes(locked)
+                ? locked
+                : nearestPort(
+                    connectingSource,
+                    pointerWorld,
+                    ports.width,
+                    ports.height,
+                    allowed,
+                  )
+            const lockedIndex = connectingSourceSlotRef.current?.index ?? 0
+            const slots = loopNodePortSlots(
+              connectingSource,
+              ports.width,
+              ports.height,
+              allowed,
+            )
+            const along =
+              slots.find(
+                (slot) =>
+                  slot.port === sourcePort && slot.index === lockedIndex,
+              )?.along ??
+              slots.find((slot) => slot.port === sourcePort)?.along ??
+              0.5
+            return routeLoopEdgePreview({
               source: connectingSource,
               endPoint: pointerWorld,
-              sourcePort: nearestPort(
-                connectingSource,
-                pointerWorld,
-                ports.width,
-                ports.height,
-                allowed,
-              ),
-              sourceAllowedPorts: allowed,
-              obstacles: draft.nodes,
-              obstacleSize: (node) => nodeBoxSize(node, draft, sizeOpts),
+              sourcePort,
               width: ports.width,
               height: ports.height,
+              sourceAlong: along,
             })
           })()
         : null
@@ -1322,7 +1818,9 @@ export default function LoopGraphOverlay() {
                 ref={canvasRef}
                 className={`${styles.canvas} ${dragging ? styles.canvasDragging : ''} ${
                   connectingFromId ? styles.canvasConnecting : ''
-                } ${paletteDropActive ? styles.canvasDropTarget : ''}`}
+                } ${paletteDropActive ? styles.canvasDropTarget : ''} ${
+                  layerMarqueeArmed ? styles.canvasLayerMarquee : ''
+                }`}
                 onWheel={onWheel}
                 onDragOver={(event) => {
                   if (phase !== 'draw') return
@@ -1413,8 +1911,17 @@ export default function LoopGraphOverlay() {
                   if (event.button !== 0) return
                   if ((event.target as HTMLElement).closest('[data-loop-node]')) return
                   if ((event.target as HTMLElement).closest('[data-loop-edge]')) return
+                  // Create-marquee may start inside a parent layer / empty work-group
+                  // frame; those hit targets are pass-through while armed.
                   if (
+                    !layerMarqueeArmed &&
                     (event.target as HTMLElement).closest('[data-loop-work-group]')
+                  ) {
+                    return
+                  }
+                  if (
+                    !layerMarqueeArmed &&
+                    (event.target as HTMLElement).closest('[data-loop-layer]')
                   ) {
                     return
                   }
@@ -1423,13 +1930,34 @@ export default function LoopGraphOverlay() {
                     setPointerWorld(null)
                     return
                   }
+                  if (
+                    layerMarqueeArmed &&
+                    phase === 'draw' &&
+                    !focusedWorkGroupId
+                  ) {
+                    const world = clientToWorld(event.clientX, event.clientY)
+                    layerGestureRef.current = {
+                      kind: 'create',
+                      x0: world.x,
+                      y0: world.y,
+                    }
+                    setLayerMarqueeRect(
+                      normalizeMarqueeRect(world.x, world.y, world.x, world.y),
+                    )
+                    blankPointerRef.current = null
+                    dragRef.current = null
+                    setDragging(false)
+                    event.currentTarget.setPointerCapture(event.pointerId)
+                    return
+                  }
                   blankPointerRef.current = {
                     x: event.clientX,
                     y: event.clientY,
                   }
+                  const vp = viewportRef.current
                   dragRef.current = {
-                    x: viewport.x,
-                    y: viewport.y,
+                    x: vp.x,
+                    y: vp.y,
                     px: event.clientX,
                     py: event.clientY,
                   }
@@ -1437,13 +1965,37 @@ export default function LoopGraphOverlay() {
                   event.currentTarget.setPointerCapture(event.pointerId)
                 }}
                 onPointerMove={(event) => {
+                  const layerGesture = layerGestureRef.current
+                  if (layerGesture) {
+                    const world = clientToWorld(event.clientX, event.clientY)
+                    if (layerGesture.kind === 'create') {
+                      setLayerMarqueeRect(
+                        normalizeMarqueeRect(
+                          layerGesture.x0,
+                          layerGesture.y0,
+                          world.x,
+                          world.y,
+                        ),
+                      )
+                    } else {
+                      setLayerMarqueeRect(
+                        resizeRectFromEdge(
+                          layerGesture.base,
+                          layerGesture.edge,
+                          world,
+                        ),
+                      )
+                    }
+                    return
+                  }
                   if (connectingFromId) {
                     setPointerWorld(clientToWorld(event.clientX, event.clientY))
                   }
                   const nodeDrag = nodeDragRef.current
                   if (nodeDrag && document) {
-                    const dx = (event.clientX - nodeDrag.px) / viewport.scale
-                    const dy = (event.clientY - nodeDrag.py) / viewport.scale
+                    const scale = viewportRef.current.scale
+                    const dx = (event.clientX - nodeDrag.px) / scale
+                    const dy = (event.clientY - nodeDrag.py) / scale
                     // Matrix-locked chips: never write positions during drag —
                     // that would resize the AABB frame. Ghost only.
                     if (nodeDrag.workGroupLocked) {
@@ -1471,6 +2023,7 @@ export default function LoopGraphOverlay() {
                       (node) => node.id === nodeDrag.id,
                     )
                     // Solo config satellite drag: keep it under its provides agent.
+                    const nextById = new Map<string, { x: number; y: number }>()
                     if (
                       draggingNode &&
                       isConfigNode(draggingNode) &&
@@ -1487,63 +2040,68 @@ export default function LoopGraphOverlay() {
                             satellitePosition: rawAgentPos,
                           })
                         : rawAgentPos
-                      updateNode(nodeDrag.id, { position: clamped })
-                      return
-                    }
-                    const nextById = new Map<string, { x: number; y: number }>([
-                      [nodeDrag.id, rawAgentPos],
-                    ])
-                    if (draggingNode && !isConfigNode(draggingNode)) {
-                      const agentSize = nodeBoxSize(
-                        draggingNode,
-                        draft,
-                        sizeOpts,
-                      )
-                      for (const follower of nodeDrag.followers) {
-                        nextById.set(
-                          follower.id,
-                          clampSatelliteToAgent({
-                            agentPosition: rawAgentPos,
-                            agentSize,
-                            satellitePosition: {
-                              x: follower.ox + dx,
-                              y: follower.oy + dy,
-                            },
-                          }),
+                      nextById.set(nodeDrag.id, clamped)
+                    } else {
+                      nextById.set(nodeDrag.id, rawAgentPos)
+                      if (draggingNode && !isConfigNode(draggingNode)) {
+                        const agentSize = nodeBoxSize(
+                          draggingNode,
+                          draft,
+                          sizeOpts,
                         )
-                      }
-                    } else {
-                      for (const follower of nodeDrag.followers) {
-                        nextById.set(follower.id, {
-                          x: follower.ox + dx,
-                          y: follower.oy + dy,
-                        })
+                        for (const follower of nodeDrag.followers) {
+                          nextById.set(
+                            follower.id,
+                            clampSatelliteToAgent({
+                              agentPosition: rawAgentPos,
+                              agentSize,
+                              satellitePosition: {
+                                x: follower.ox + dx,
+                                y: follower.oy + dy,
+                              },
+                            }),
+                          )
+                        }
+                      } else {
+                        for (const follower of nodeDrag.followers) {
+                          nextById.set(follower.id, {
+                            x: follower.ox + dx,
+                            y: follower.oy + dy,
+                          })
+                        }
                       }
                     }
-                    if (nextById.size === 1) {
-                      updateNode(nodeDrag.id, {
-                        position: nextById.get(nodeDrag.id)!,
-                      })
-                    } else {
-                      patchDraft({
-                        ...draft,
-                        nodes: draft.nodes.map((node) => {
-                          const next = nextById.get(node.id)
-                          return next ? { ...node, position: next } : node
-                        }),
-                      })
-                    }
+                    // DOM-only mid-drag — avoid Zustand + full edge re-route.
+                    nodeDrag.pendingById = nextById
+                    setWorldDomPositions(worldRef.current, nextById)
                     return
                   }
                   const drag = dragRef.current
                   if (!drag) return
-                  setViewport((current) => ({
-                    ...current,
+                  // Pan via DOM transform only — avoid re-rendering every node
+                  // on each pointermove when the canvas is dense.
+                  applyViewportDom({
+                    ...viewportRef.current,
                     x: drag.x + event.clientX - drag.px,
                     y: drag.y + event.clientY - drag.py,
-                  }))
+                  })
                 }}
                 onPointerUp={(event) => {
+                  if (layerGestureRef.current && layerMarqueeRect) {
+                    commitLayerMarquee(layerMarqueeRect)
+                    try {
+                      canvasRef.current?.releasePointerCapture?.(event.pointerId)
+                    } catch {
+                      /* ignore */
+                    }
+                    dragRef.current = null
+                    setDragging(false)
+                    return
+                  }
+                  if (layerGestureRef.current) {
+                    cancelLayerGesture()
+                  }
+
                   const blankStart = blankPointerRef.current
                   blankPointerRef.current = null
                   if (
@@ -1556,6 +2114,7 @@ export default function LoopGraphOverlay() {
                   ) {
                     setSelectedNodeId(null)
                     selectWorkGroup(null)
+                    selectLayer(null)
                     clearAuthoringFocus()
                   }
 
@@ -1564,6 +2123,47 @@ export default function LoopGraphOverlay() {
                   workGroupExitGhostRef.current = null
                   setWorkGroupExitGhost(null)
                   if (nodeDrag && document) {
+                    const scale = viewportRef.current.scale
+                    const dx =
+                      (event.clientX - nodeDrag.px) / scale
+                    const dy =
+                      (event.clientY - nodeDrag.py) / scale
+                    const pending =
+                      nodeDrag.pendingById.size > 0
+                        ? nodeDrag.pendingById
+                        : new Map<string, { x: number; y: number }>([
+                            [
+                              nodeDrag.id,
+                              {
+                                x: nodeDrag.ox + dx,
+                                y: nodeDrag.oy + dy,
+                              },
+                            ],
+                          ])
+
+                    // Commit DOM-only drag into the draft once.
+                    if (!nodeDrag.workGroupLocked && pending.size > 0) {
+                      const live =
+                        useLoopGraphStore.getState().document?.draft ?? draft
+                      const moved = [...pending.entries()].some(([id, pos]) => {
+                        const node = live.nodes.find((item) => item.id === id)
+                        if (!node) return true
+                        return (
+                          Math.abs(node.position.x - pos.x) > 0.5 ||
+                          Math.abs(node.position.y - pos.y) > 0.5
+                        )
+                      })
+                      if (moved) {
+                        patchDraft({
+                          ...live,
+                          nodes: live.nodes.map((node) => {
+                            const next = pending.get(node.id)
+                            return next ? { ...node, position: next } : node
+                          }),
+                        })
+                      }
+                    }
+
                     const latestDraft =
                       useLoopGraphStore.getState().document?.draft ?? draft
                     const moving =
@@ -1590,12 +2190,8 @@ export default function LoopGraphOverlay() {
                         const ghostPos = exitGhost
                           ? { x: exitGhost.x, y: exitGhost.y }
                           : {
-                              x:
-                                nodeDrag.ox +
-                                (event.clientX - nodeDrag.px) / viewport.scale,
-                              y:
-                                nodeDrag.oy +
-                                (event.clientY - nodeDrag.py) / viewport.scale,
+                              x: nodeDrag.ox + dx,
+                              y: nodeDrag.oy + dy,
                             }
                         const settledSize = exitGhost
                           ? {
@@ -1727,8 +2323,8 @@ export default function LoopGraphOverlay() {
                             Math.abs(snapped.x - moving.position.x) > 0.5 ||
                             Math.abs(snapped.y - moving.position.y) > 0.5
                           ) {
-                            const dx = snapped.x - moving.position.x
-                            const dy = snapped.y - moving.position.y
+                            const snapDx = snapped.x - moving.position.x
+                            const snapDy = snapped.y - moving.position.y
                             if (nodeDrag.followers.length === 0) {
                               updateNode(moving.id, { position: snapped })
                             } else {
@@ -1756,8 +2352,8 @@ export default function LoopGraphOverlay() {
                                       agentPosition: snapped,
                                       agentSize,
                                       satellitePosition: {
-                                        x: node.position.x + dx,
-                                        y: node.position.y + dy,
+                                        x: node.position.x + snapDx,
+                                        y: node.position.y + snapDy,
                                       },
                                     }),
                                   }
@@ -1769,7 +2365,17 @@ export default function LoopGraphOverlay() {
                       }
                     }
                   }
+                  setGeometryChromeDimmed(
+                    edgesLayerRef.current,
+                    branchLabelLayerRef.current,
+                    false,
+                  )
                   frozenWorkGroupFrameRef.current = null
+                  // Commit camera after DOM-only pan so React culling / duty
+                  // card anchors catch up in one frame (not per pointermove).
+                  if (dragRef.current) {
+                    commitViewport(viewportRef.current)
+                  }
                   dragRef.current = null
                   nodeDragRef.current = null
                   setDragging(false)
@@ -1780,6 +2386,14 @@ export default function LoopGraphOverlay() {
                   }
                 }}
               >
+                {layerMarqueeArmed || layerMarqueeRect ? (
+                  <div className={layerStyles.hintBanner} role="status">
+                    {!layerMarqueeArmed &&
+                    layerGestureRef.current?.kind === 'resize'
+                      ? ts('chat.loopGraph.layer.resizeHint')
+                      : ts('chat.loopGraph.layer.createHint')}
+                  </div>
+                ) : null}
                 {!document ? (
                   <p className={styles.empty}>{ts('chat.loopGraph.empty')}</p>
                 ) : draft.nodes.length === 0 && workGroups.length === 0 ? (
@@ -1792,13 +2406,107 @@ export default function LoopGraphOverlay() {
                     </p>
                   ) : null}
                   <div
-                    className={styles.world}
+                    ref={worldRef}
+                    className={`${styles.world} ${
+                      dragging ? styles.worldPanning : ''
+                    }`}
                     style={{
                       width: worldWidth,
                       height: worldHeight,
-                      transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})`,
+                      // While panning, prefer the live ref so an incidental
+                      // re-render cannot snap the camera back to stale state.
+                      transform: formatWorldTransform(
+                        dragging ? viewportRef.current : viewport,
+                      ),
                     }}
                   >
+                    {!focusedWorkGroupId
+                      ? [...layers]
+                          .map((layer) => {
+                            const bounds = layerFrameBoundsFor(
+                              layer.memberNodeIds,
+                            )
+                            return { layer, bounds }
+                          })
+                          .filter(
+                            (
+                              item,
+                            ): item is {
+                              layer: (typeof layers)[number]
+                              bounds: LoopLayerRect
+                            } => Boolean(item.bounds),
+                          )
+                          // Larger parents under smaller nested children; selected on top.
+                          .sort((a, b) => {
+                            const areaA = a.bounds.width * a.bounds.height
+                            const areaB = b.bounds.width * b.bounds.height
+                            if (areaA !== areaB) return areaB - areaA
+                            const aSelected = a.layer.id === selectedLayerId ? 1 : 0
+                            const bSelected = b.layer.id === selectedLayerId ? 1 : 0
+                            return aSelected - bSelected
+                          })
+                          .map(({ layer, bounds }) => {
+                            // Formal frame stays frozen while judgment marquee is active.
+                            const resizeGesture = layerGestureRef.current
+                            const formalBounds =
+                              resizeGesture?.kind === 'resize' &&
+                              resizeGesture.layerId === layer.id
+                                ? resizeGesture.base
+                                : bounds
+                            if (
+                              !nodeInFrustum(
+                                { x: formalBounds.x, y: formalBounds.y },
+                                {
+                                  width: formalBounds.width,
+                                  height: formalBounds.height,
+                                },
+                              )
+                            ) {
+                              return null
+                            }
+                            return (
+                              <LoopLayerFrame
+                                key={layer.id}
+                                layerId={layer.id}
+                                title={layer.title}
+                                colorKey={layer.colorKey}
+                                bounds={formalBounds}
+                                memberCount={layer.memberNodeIds.length}
+                                selected={selectedLayerId === layer.id}
+                                pointerPassThrough={
+                                  layerMarqueeArmed ||
+                                  (Boolean(layerMarqueeRect) &&
+                                    layerGestureRef.current?.kind === 'create')
+                                }
+                                onSelect={() => selectLayer(layer.id)}
+                                onRename={(title) => renameLayer(layer.id, title)}
+                                onSetColor={(colorKey) =>
+                                  setLayerColor(layer.id, colorKey)
+                                }
+                                onDissolve={() => dissolveLayer(layer.id)}
+                                onResizeEdgePointerDown={(
+                                  id,
+                                  edge,
+                                  pointerEvent,
+                                ) => {
+                                  beginLayerResize(id, edge, pointerEvent)
+                                }}
+                              />
+                            )
+                          })
+                      : null}
+                    {layerMarqueeRect ? (
+                      <div
+                        className={layerStyles.marquee}
+                        style={{
+                          left: layerMarqueeRect.x,
+                          top: layerMarqueeRect.y,
+                          width: layerMarqueeRect.width,
+                          height: layerMarqueeRect.height,
+                        }}
+                        aria-hidden
+                      />
+                    ) : null}
                     {!focusedWorkGroupId
                       ? workGroups.map((group) => {
                           const bounds =
@@ -1806,6 +2514,14 @@ export default function LoopGraphOverlay() {
                             defaultEmptyLoopWorkGroupFrame(
                               group.origin ?? { x: 80, y: 80 },
                             )
+                          if (
+                            !nodeInFrustum(
+                              { x: bounds.x, y: bounds.y },
+                              { width: bounds.width, height: bounds.height },
+                            )
+                          ) {
+                            return null
+                          }
                           const coordinator = group.coordinatorNodeId
                             ? draft.nodes.find(
                                 (node) => node.id === group.coordinatorNodeId,
@@ -1820,18 +2536,139 @@ export default function LoopGraphOverlay() {
                               key={group.id}
                               workGroupId={group.id}
                               title={group.title}
+                              taskTitle={resolveLoopWorkGroupTaskTitle(
+                                group,
+                                group.departmentTemplateId
+                                  ? getLoopDepartmentTemplate(
+                                      group.departmentTemplateId,
+                                    )?.title
+                                  : null,
+                              )}
+                              departmentName={
+                                group.departmentTemplateId
+                                  ? getLoopDepartmentTemplate(
+                                      group.departmentTemplateId,
+                                    )?.title ?? null
+                                  : null
+                              }
                               bounds={bounds}
                               memberCount={surfaceCount}
                               selected={selectedWorkGroupId === group.id}
                               collaborationMode={group.collaborationMode}
                               coordinatorTitle={coordinator?.title}
-                              showPorts={phase === 'draw'}
+                              isDepartment={Boolean(group.departmentTemplateId)}
+                              startTaskEdit={
+                                pendingWorkGroupTaskEditId === group.id
+                              }
+                              showPorts={
+                                phase === 'draw' &&
+                                (selectedWorkGroupId === group.id ||
+                                  Boolean(connectingFromId))
+                              }
+                              pointerPassThrough={
+                                layerMarqueeArmed ||
+                                (Boolean(layerMarqueeRect) &&
+                                  layerGestureRef.current?.kind === 'create')
+                              }
                               onSelect={() => selectWorkGroup(group.id)}
-                              onRename={(title) => renameWorkGroup(group.id, title)}
+                              onRename={(taskTitle) =>
+                                renameWorkGroup(group.id, taskTitle)
+                              }
+                              onTaskEditConsumed={() =>
+                                requestWorkGroupTaskEdit(null)
+                              }
                               onTitleDragMove={({ dx, dy }) => {
-                                moveWorkGroup(group.id, {
-                                  dx: dx / viewport.scale,
-                                  dy: dy / viewport.scale,
+                                const scale = viewportRef.current.scale
+                                const worldDx = dx / scale
+                                const worldDy = dy / scale
+                                let drag = workGroupDragRef.current
+                                if (!drag || drag.id !== group.id) {
+                                  const memberSet = new Set(group.memberNodeIds)
+                                  const nodeStarts: Array<{
+                                    id: string
+                                    x: number
+                                    y: number
+                                  }> = []
+                                  for (const node of draft.nodes) {
+                                    if (memberSet.has(node.id)) {
+                                      nodeStarts.push({
+                                        id: node.id,
+                                        x: node.position.x,
+                                        y: node.position.y,
+                                      })
+                                      continue
+                                    }
+                                    if (!isConfigNode(node)) continue
+                                    const feeds = draft.edges.some(
+                                      (edge) =>
+                                        edge.kind === 'provides' &&
+                                        edge.source === node.id &&
+                                        memberSet.has(edge.target),
+                                    )
+                                    if (feeds) {
+                                      nodeStarts.push({
+                                        id: node.id,
+                                        x: node.position.x,
+                                        y: node.position.y,
+                                      })
+                                    }
+                                  }
+                                  drag = {
+                                    id: group.id,
+                                    accDx: 0,
+                                    accDy: 0,
+                                    frameStart: { x: bounds.x, y: bounds.y },
+                                    nodeStarts,
+                                  }
+                                  workGroupDragRef.current = drag
+                                  setGeometryChromeDimmed(
+                                    edgesLayerRef.current,
+                                    branchLabelLayerRef.current,
+                                    true,
+                                  )
+                                }
+                                drag.accDx += worldDx
+                                drag.accDy += worldDy
+                                setWorldWorkGroupDomPosition(
+                                  worldRef.current,
+                                  drag.id,
+                                  {
+                                    x: drag.frameStart.x + drag.accDx,
+                                    y: drag.frameStart.y + drag.accDy,
+                                  },
+                                )
+                                const nodePositions = new Map<
+                                  string,
+                                  { x: number; y: number }
+                                >()
+                                for (const start of drag.nodeStarts) {
+                                  nodePositions.set(start.id, {
+                                    x: start.x + drag.accDx,
+                                    y: start.y + drag.accDy,
+                                  })
+                                }
+                                setWorldDomPositions(
+                                  worldRef.current,
+                                  nodePositions,
+                                )
+                              }}
+                              onTitleDragEnd={() => {
+                                const drag = workGroupDragRef.current
+                                workGroupDragRef.current = null
+                                setGeometryChromeDimmed(
+                                  edgesLayerRef.current,
+                                  branchLabelLayerRef.current,
+                                  false,
+                                )
+                                if (
+                                  !drag ||
+                                  (drag.accDx === 0 && drag.accDy === 0)
+                                ) {
+                                  return
+                                }
+                                moveWorkGroup(drag.id, {
+                                  dx: drag.accDx,
+                                  dy: drag.accDy,
                                 })
                               }}
                               onDissolve={() => dissolveWorkGroup(group.id)}
@@ -1843,7 +2680,12 @@ export default function LoopGraphOverlay() {
                           )
                         })
                       : null}
-                    <svg className={styles.edges} width={worldWidth} height={worldHeight}>
+                    <svg
+                      ref={edgesLayerRef}
+                      className={styles.edges}
+                      width={worldWidth}
+                      height={worldHeight}
+                    >
                       {draft.edges.map((edge) => {
                         if (edge.kind === 'provides') {
                           if (hideWiringSatellites) return null
@@ -1893,9 +2735,14 @@ export default function LoopGraphOverlay() {
                                 defaultEmptyLoopWorkGroupFrame(
                                   sourceWg!.origin ?? { x: 80, y: 80 },
                                 )
-                              const port =
-                                edge.workGroupPort === 'in' ? 'in' : 'out'
-                              const origin = workGroupPortWorld(bounds, port)
+                              const stored = normalizeLoopWorkGroupPort(
+                                edge.workGroupPort,
+                                'e',
+                              )
+                              // Stored port is the source WG attachment when
+                              // the edge leaves a work group.
+                              const port = stored
+                              const origin = loopWorkGroupPortWorld(bounds, port)
                               return {
                                 id: sourceWg!.id,
                                 title: sourceWg!.title,
@@ -1911,9 +2758,16 @@ export default function LoopGraphOverlay() {
                                 defaultEmptyLoopWorkGroupFrame(
                                   targetWg!.origin ?? { x: 80, y: 80 },
                                 )
-                              const port =
-                                edge.workGroupPort === 'out' ? 'out' : 'in'
-                              const origin = workGroupPortWorld(bounds, port)
+                              const stored = normalizeLoopWorkGroupPort(
+                                edge.workGroupPort,
+                                'w',
+                              )
+                              // Source-WG edges only store the exit port —
+                              // approach the target on the opposite side.
+                              const port = sourceWg
+                                ? oppositeLoopWorkGroupPort(stored)
+                                : stored
+                              const origin = loopWorkGroupPortWorld(bounds, port)
                               return {
                                 id: targetWg!.id,
                                 title: targetWg!.title,
@@ -1924,6 +2778,16 @@ export default function LoopGraphOverlay() {
                         const sourceSize = sourceNode
                           ? nodeBoxSize(sourceNode, draft, sizeOpts)
                           : { width: 2, height: 2 }
+                        const targetSize = targetNode
+                          ? nodeBoxSize(targetNode, draft, sizeOpts)
+                          : { width: 2, height: 2 }
+                        // Skip edges whose both ends are off-screen (idle camera).
+                        if (
+                          !nodeInFrustum(source.position, sourceSize) &&
+                          !nodeInFrustum(target.position, targetSize)
+                        ) {
+                          return null
+                        }
                         const provides = edge.kind === 'provides'
                         const providesPort =
                           provides && sourceNode
@@ -1931,7 +2795,11 @@ export default function LoopGraphOverlay() {
                               expectedConfigPort(sourceNode) ??
                               'model'
                             : null
-                        let routed: { d: string; mid: { x: number; y: number } }
+                        let routed: {
+                          d: string
+                          mid: { x: number; y: number }
+                          sourceNear: { x: number; y: number }
+                        }
                         if (provides && providesPort && sourceNode && targetNode) {
                           // Capability wiring stays curved so it reads as Agent↔config,
                           // not as a normal workflow depends/conditional edge.
@@ -1943,7 +2811,14 @@ export default function LoopGraphOverlay() {
                             draft,
                             satelliteId: source.id,
                           })
-                          routed = routeProvidesCurve({ start, end })
+                          const providesRoute = routeProvidesCurve({ start, end })
+                          routed = {
+                            ...providesRoute,
+                            sourceNear: pointAlongPolyline(
+                              providesRoute.points ?? [start, end],
+                              DECISION_BRANCH_LABEL_T,
+                            ),
+                          }
                         } else {
                           const batched =
                             sourceNode && targetNode
@@ -1953,6 +2828,7 @@ export default function LoopGraphOverlay() {
                             routed = {
                               d: batched.d,
                               mid: batched.mid,
+                              sourceNear: batched.sourceNear,
                             }
                           } else {
                             const sourcePorts = sourceNode
@@ -1967,29 +2843,51 @@ export default function LoopGraphOverlay() {
                                   ? `${edge.branchKey}: ${edge.prompt ?? ''}`
                                   : (edge.prompt ?? ''),
                               ) || ts('chat.loopGraph.edgeLabelPending')
-                            routed = routeLoopEdge({
+                            const fallback = routeLoopEdge({
                               source,
                               target,
                               sourcePort: sourceNode
                                 ? edge.sourcePort
-                                : edge.workGroupPort === 'in'
-                                  ? 'w'
-                                  : 'e',
+                                : normalizeLoopWorkGroupPort(
+                                    edge.workGroupPort,
+                                    'e',
+                                  ),
                               targetPort: targetNode
                                 ? edge.targetPort
-                                : edge.workGroupPort === 'out'
-                                  ? 'e'
-                                  : 'w',
+                                : sourceWg
+                                  ? oppositeLoopWorkGroupPort(
+                                      normalizeLoopWorkGroupPort(
+                                        edge.workGroupPort,
+                                        'e',
+                                      ),
+                                    )
+                                  : normalizeLoopWorkGroupPort(
+                                      edge.workGroupPort,
+                                      'w',
+                                    ),
                               sourceAllowedPorts: sourceNode
                                 ? workflowPortsForNode(sourceNode, draft)
-                                : edge.workGroupPort === 'in'
-                                  ? ['w']
-                                  : ['e'],
+                                : [
+                                    normalizeLoopWorkGroupPort(
+                                      edge.workGroupPort,
+                                      'e',
+                                    ),
+                                  ],
                               targetAllowedPorts: targetNode
                                 ? workflowPortsForNode(targetNode, draft)
-                                : edge.workGroupPort === 'out'
-                                  ? ['e']
-                                  : ['w'],
+                                : [
+                                    sourceWg
+                                      ? oppositeLoopWorkGroupPort(
+                                          normalizeLoopWorkGroupPort(
+                                            edge.workGroupPort,
+                                            'e',
+                                          ),
+                                        )
+                                      : normalizeLoopWorkGroupPort(
+                                          edge.workGroupPort,
+                                          'w',
+                                        ),
+                                  ],
                               obstacles: draft.nodes,
                               obstacleSize: (node) =>
                                 nodeBoxSize(node, draft, sizeOpts),
@@ -1999,6 +2897,14 @@ export default function LoopGraphOverlay() {
                               targetHeight: targetPorts.height,
                               labelText: labelForRoute,
                             })
+                            routed = {
+                              d: fallback.d,
+                              mid: fallback.mid,
+                              sourceNear: pointAlongPolyline(
+                                fallback.points,
+                                DECISION_BRANCH_LABEL_T,
+                              ),
+                            }
                           }
                         }
                         const incomplete =
@@ -2108,6 +3014,8 @@ export default function LoopGraphOverlay() {
                     </svg>
                     {draft.nodes.map((node) => {
                       if (!nodeVisibleOnCanvas(node)) return null
+                      const size = nodeBoxSize(node, draft, sizeOpts)
+                      if (!nodeInFrustum(node.position, size)) return null
                       const configSatellite = isConfigNode(node)
                       const isCursor = activeInstance?.cursorNodeId === node.id
                       const isHitl =
@@ -2125,17 +3033,20 @@ export default function LoopGraphOverlay() {
                           : null
                       const isAgentDuty =
                         !configSatellite && (node.type ?? 'agent') === 'agent'
-                      // Compact chip only on L1 surface; L2 shows full Agent cards + wiring.
+                      // L1 surface: duty card without wiring strip. L2: full Agent + wiring.
                       const inWorkGroup =
                         !focusedWorkGroupId && isWorkGroupMemberAgent(node)
                       const incomplete = configSatellite
                         ? !node.satelliteKind
-                        : !node.prompt.trim()
+                        : !(
+                            hasDutyAssignment(node) ||
+                            (node.dutyItems?.length ?? 0) > 0 ||
+                            Boolean(node.prompt.trim())
+                          )
                       const wiringLayout =
                         isAgentDuty && !inWorkGroup
                           ? buildAgentWiringLayout(node, draft)
                           : null
-                      const size = nodeBoxSize(node, draft, sizeOpts)
                       const portSize = workflowPortBoxSize(node, draft, sizeOpts)
                       const visual = visualForIntentNode(node)
                       const diamond = isDiamondLoopNode(node)
@@ -2167,13 +3078,17 @@ export default function LoopGraphOverlay() {
                           className={`${styles.node} ${categoryClass} ${
                             configSatellite ? styles.nodeConfig : ''
                           } ${
+                            configSatellite && isWiringListKind(node.satelliteKind)
+                              ? styles.nodeConfigList
+                              : ''
+                          } ${
                             isAgentDuty && !inWorkGroup ? styles.nodeAgentWired : ''
                           } ${inWorkGroup ? styles.nodeWorkGroupMember : ''} ${
                             diamond ? styles.nodeDiamond : ''
                           } ${
                             selectedNodeId === node.id ? styles.nodeActive : ''
                           } ${connectingFromId === node.id ? styles.nodeConnecting : ''} ${
-                            incomplete && !inWorkGroup ? styles.nodeIncomplete : ''
+                            incomplete ? styles.nodeIncomplete : ''
                           } ${isCursor && phase === 'run' ? styles.nodeRunning : ''} ${
                             isHitl ? styles.nodeHitl : ''
                           } ${
@@ -2203,7 +3118,13 @@ export default function LoopGraphOverlay() {
                             top: node.position.y,
                             width: size.width,
                             minHeight: size.height,
-                            ...(diamond || inWorkGroup
+                            // Lock AABB height whenever ports are computed from
+                            // size.height — otherwise content growth leaves the
+                            // south workflow port floating inside the card.
+                            ...(diamond ||
+                            inWorkGroup ||
+                            (isAgentDuty && !inWorkGroup) ||
+                            isWiringListKind(node.satelliteKind)
                               ? { height: size.height, minHeight: size.height }
                               : null),
                           }}
@@ -2224,6 +3145,23 @@ export default function LoopGraphOverlay() {
                             }
                             event.stopPropagation()
                             if (configSatellite) {
+                              if (
+                                node.satelliteKind === 'mcp_list' ||
+                                node.satelliteKind === 'skill_list'
+                              ) {
+                                setWiringListPopover({
+                                  listNodeId: node.id,
+                                  kind:
+                                    node.satelliteKind === 'mcp_list'
+                                      ? 'mcp'
+                                      : 'skill',
+                                  anchor: {
+                                    x: event.clientX,
+                                    y: event.clientY,
+                                  },
+                                })
+                                return
+                              }
                               const kind =
                                 node.satelliteKind === 'model' ||
                                 node.satelliteKind === 'skill' ||
@@ -2270,6 +3208,9 @@ export default function LoopGraphOverlay() {
                             // Ignore right/middle click so contextmenu is not stolen by
                             // pointer capture on the canvas (which only showed "Add node").
                             if (event.button !== 0) return
+                            if (layerMarqueeArmed && !layerGestureRef.current) {
+                              cancelLayerGesture()
+                            }
                             const clickWorld = clientToWorld(event.clientX, event.clientY)
                             const hitPortEl = (event.target as HTMLElement | null)
                               ?.closest?.('[data-loop-port]') as HTMLElement | null
@@ -2305,6 +3246,30 @@ export default function LoopGraphOverlay() {
                               if (!inShape) return
                             }
                             event.stopPropagation()
+                            // L1 work-group chips are not workflow endpoints —
+                            // elevate an in-progress wire onto the frame instead.
+                            if (
+                              connectingFromId &&
+                              inWorkGroup &&
+                              node.workGroupId &&
+                              connectingFromId !== node.workGroupId
+                            ) {
+                              const bounds =
+                                workGroupBoundsById.get(node.workGroupId) ??
+                                defaultEmptyLoopWorkGroupFrame(
+                                  workGroups.find(
+                                    (group) => group.id === node.workGroupId,
+                                  )?.origin ?? node.position,
+                                )
+                              finishConnectToWorkGroup(
+                                node.workGroupId,
+                                nearestWorkGroupPort(bounds, clickWorld),
+                              )
+                              return
+                            }
+                            if (inWorkGroup && connectingFromId) {
+                              return
+                            }
                             setSelectedNodeId(node.id)
                             if (
                               phase === 'draw' &&
@@ -2333,8 +3298,10 @@ export default function LoopGraphOverlay() {
                                         targetAllowed,
                                       )
                                 void beginAuthorEdge(connectingFromId, node.id, {
-                                  workGroupPort:
-                                    connectingWorkGroupPortRef.current ?? 'out',
+                                  workGroupPort: normalizeLoopWorkGroupPort(
+                                    connectingWorkGroupPortRef.current,
+                                    'e',
+                                  ),
                                   targetPort,
                                   targetPortIndex: Number.isFinite(hitPortIndex)
                                     ? hitPortIndex
@@ -2470,9 +3437,17 @@ export default function LoopGraphOverlay() {
                               py: event.clientY,
                               followers: lockToMatrix ? [] : followers,
                               workGroupLocked: lockToMatrix,
+                              pendingById: new Map(),
                               ...(homeWorkGroupId
                                 ? { homeWorkGroupId }
                                 : {}),
+                            }
+                            if (!lockToMatrix) {
+                              setGeometryChromeDimmed(
+                                edgesLayerRef.current,
+                                branchLabelLayerRef.current,
+                                true,
+                              )
                             }
                             // Capture on the canvas so locked-drag moves hit the
                             // handler that refuses to mutate member positions.
@@ -2480,6 +3455,7 @@ export default function LoopGraphOverlay() {
                           }}
                         >
                           {!configSatellite &&
+                            !inWorkGroup &&
                             (connectingFromId || selectedNodeId === node.id) &&
                             loopNodePortSlots(
                               node,
@@ -2514,6 +3490,34 @@ export default function LoopGraphOverlay() {
                                     event.stopPropagation()
                                     event.preventDefault()
                                     const seed = clientToWorld(event.clientX, event.clientY)
+                                    // Complete an in-progress wire onto this port.
+                                    // Work-group endpoints must be handled here —
+                                    // connectingSource is only set for node→node.
+                                    if (
+                                      connectingFromId &&
+                                      connectingFromId !== node.id &&
+                                      connectingWorkGroup
+                                    ) {
+                                      void beginAuthorEdge(
+                                        connectingFromId,
+                                        node.id,
+                                        {
+                                          workGroupPort:
+                                            normalizeLoopWorkGroupPort(
+                                              connectingWorkGroupPortRef.current,
+                                              'e',
+                                            ),
+                                          targetPort: slot.port,
+                                          targetPortIndex: slot.index,
+                                        },
+                                      ).then(() => {
+                                        setPointerWorld(null)
+                                        connectingWorkGroupPortRef.current =
+                                          null
+                                        connectingSourceSlotRef.current = null
+                                      })
+                                      return
+                                    }
                                     if (
                                       connectingFromId &&
                                       connectingFromId !== node.id &&
@@ -2580,7 +3584,65 @@ export default function LoopGraphOverlay() {
                                 />
                               )
                             })}
-                          {configSatellite ? (
+                          {configSatellite &&
+                          isWiringListKind(node.satelliteKind) ? (
+                            (() => {
+                              const listMembers = wiringListMembersOf(node)
+                              const visible = listMembers.slice(
+                                0,
+                                LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+                              )
+                              const hidden = Math.max(
+                                0,
+                                listMembers.length -
+                                  LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+                              )
+                              return (
+                                <div
+                                  className={styles.nodeConfigListCard}
+                                  data-loop-wiring-list={node.satelliteKind}
+                                >
+                                  <div className={styles.nodeConfigListCardHeader}>
+                                    <span
+                                      className={`${styles.nodeConfigListCardIcon} ${categoryClass}`}
+                                      aria-hidden
+                                    >
+                                      <ConfigIcon
+                                        size={12}
+                                        strokeWidth={1.75}
+                                      />
+                                    </span>
+                                    <span className={styles.nodeConfigListCardTitle}>
+                                      {node.title || visual.shortLabel}
+                                    </span>
+                                  </div>
+                                  <ul className={styles.nodeConfigListCardRows}>
+                                    {visible.map((member) => (
+                                      <li
+                                        key={member.id}
+                                        className={styles.nodeConfigListCardRow}
+                                        title={member.title}
+                                      >
+                                        {member.title.replace(
+                                          /^(MCP|Skill)\s*·\s*/i,
+                                          '',
+                                        )}
+                                      </li>
+                                    ))}
+                                    {hidden > 0 ? (
+                                      <li
+                                        className={styles.nodeConfigListCardMore}
+                                      >
+                                        {ts('chat.loopGraph.wiringListMore', {
+                                          count: hidden,
+                                        })}
+                                      </li>
+                                    ) : null}
+                                  </ul>
+                                </div>
+                              )
+                            })()
+                          ) : configSatellite ? (
                             <span
                               className={`${styles.nodeConfigLogo} ${categoryClass}`}
                               title={node.title || visual.shortLabel}
@@ -2642,38 +3704,128 @@ export default function LoopGraphOverlay() {
                                 ) : null}
                               </div>
                               <div className={styles.nodeTask}>
-                                {node.prompt.trim()
-                                  ? node.prompt
-                                  : ts('chat.loopGraph.descriptionEmpty')}
+                                <LoopNodeDutyChecklist
+                                  node={node}
+                                  specNode={
+                                    document?.approvedSpecs
+                                      .find(
+                                        (spec) =>
+                                          spec.version ===
+                                          activeInstance?.specVersion,
+                                      )
+                                      ?.nodes.find((item) => item.id === node.id) ??
+                                    document?.pendingCompile?.specDraft.nodes.find(
+                                      (item) => item.id === node.id,
+                                    ) ??
+                                    null
+                                  }
+                                  runtimeItems={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyItems
+                                  }
+                                  progress={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyProgress
+                                  }
+                                  compact
+                                  interactive={Boolean(
+                                    isHitl && (node.type === 'human' || node.humanMode),
+                                  )}
+                                  allowAdd={Boolean(
+                                    isCursor &&
+                                      phase === 'run' &&
+                                      (isHitl ||
+                                        activeInstance?.status === 'running'),
+                                  )}
+                                  onToggle={(itemId, status) => {
+                                    void patchDutyProgress(node.id, itemId, status)
+                                  }}
+                                  onAdd={(text) => {
+                                    void mutateDutyChecklist(node.id, {
+                                      op: 'add',
+                                      text,
+                                      kind:
+                                        node.type === 'human' ? 'human' : 'machine',
+                                    })
+                                  }}
+                                />
                               </div>
                             </LoopDiamondAutosize>
                           ) : inWorkGroup ? (
                             <div className={styles.nodeWorkGroupMemberInner}>
-                              {runTone ? (
+                              <div className={styles.nodeTop}>
+                                {runTone ? (
+                                  <span
+                                    className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
+                                    title={runTone}
+                                    aria-label={runTone}
+                                  />
+                                ) : null}
                                 <span
-                                  className={`${styles.statusDot} ${styles[`status_${runTone}`] ?? ''}`}
-                                  title={runTone}
-                                  aria-label={runTone}
-                                />
-                              ) : null}
-                              <span
-                                className={`${styles.nodeIcon} ${categoryClass}`}
-                                title={visual.shortLabel}
-                                aria-hidden
-                              >
-                                <NodeIcon size={13} strokeWidth={1.75} />
-                              </span>
-                              <span className={styles.nodeTitle}>
-                                {node.title || visual.shortLabel}
-                              </span>
-                              {isCoordinator ? (
-                                <span
-                                  className={styles.nodeWorkGroupCrown}
-                                  title={ts('chat.loopGraph.workGroup.coordinator')}
+                                  className={`${styles.nodeIcon} ${categoryClass}`}
+                                  title={visual.shortLabel}
+                                  aria-hidden
                                 >
-                                  <Crown size={11} strokeWidth={1.75} aria-hidden />
+                                  <NodeIcon size={14} strokeWidth={1.75} />
                                 </span>
-                              ) : null}
+                                <span className={styles.nodeTitle}>
+                                  {node.title || visual.shortLabel}
+                                </span>
+                                {isCoordinator ? (
+                                  <span
+                                    className={styles.nodeWorkGroupSupervisorBadge}
+                                    title={ts('chat.loopGraph.workGroup.supervisorHint')}
+                                  >
+                                    <Crown size={11} strokeWidth={1.75} aria-hidden />
+                                    <span>
+                                      {ts('chat.loopGraph.workGroup.supervisor')}
+                                    </span>
+                                  </span>
+                                ) : null}
+                                {incomplete ? (
+                                  <span className={styles.incompleteMark}>
+                                    {ts('chat.loopGraph.incomplete')}
+                                  </span>
+                                ) : null}
+                              </div>
+                              <div className={styles.nodeTask}>
+                                <LoopNodeDutyChecklist
+                                  node={node}
+                                  specNode={
+                                    document?.approvedSpecs
+                                      .find(
+                                        (spec) =>
+                                          spec.version ===
+                                          activeInstance?.specVersion,
+                                      )
+                                      ?.nodes.find((item) => item.id === node.id) ??
+                                    document?.pendingCompile?.specDraft.nodes.find(
+                                      (item) => item.id === node.id,
+                                    ) ??
+                                    null
+                                  }
+                                  runtimeItems={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyItems
+                                  }
+                                  progress={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyProgress
+                                  }
+                                  compact
+                                  interactive={Boolean(
+                                    isHitl &&
+                                      (node.type === 'human' || node.humanMode),
+                                  )}
+                                  onToggle={(itemId, status) => {
+                                    void patchDutyProgress(node.id, itemId, status)
+                                  }}
+                                />
+                              </div>
                             </div>
                           ) : (
                             <>
@@ -2702,9 +3854,53 @@ export default function LoopGraphOverlay() {
                                 ) : null}
                               </div>
                               <div className={styles.nodeTask}>
-                                {node.prompt.trim()
-                                  ? node.prompt
-                                  : ts('chat.loopGraph.descriptionEmpty')}
+                                <LoopNodeDutyChecklist
+                                  node={node}
+                                  specNode={
+                                    document?.approvedSpecs
+                                      .find(
+                                        (spec) =>
+                                          spec.version ===
+                                          activeInstance?.specVersion,
+                                      )
+                                      ?.nodes.find((item) => item.id === node.id) ??
+                                    document?.pendingCompile?.specDraft.nodes.find(
+                                      (item) => item.id === node.id,
+                                    ) ??
+                                    null
+                                  }
+                                  runtimeItems={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyItems
+                                  }
+                                  progress={
+                                    activeInstance?.nodeRecords?.find(
+                                      (item) => item.nodeId === node.id,
+                                    )?.dutyProgress
+                                  }
+                                  compact
+                                  interactive={Boolean(
+                                    isHitl && (node.type === 'human' || node.humanMode),
+                                  )}
+                                  allowAdd={Boolean(
+                                    isCursor &&
+                                      phase === 'run' &&
+                                      (isHitl ||
+                                        activeInstance?.status === 'running'),
+                                  )}
+                                  onToggle={(itemId, status) => {
+                                    void patchDutyProgress(node.id, itemId, status)
+                                  }}
+                                  onAdd={(text) => {
+                                    void mutateDutyChecklist(node.id, {
+                                      op: 'add',
+                                      text,
+                                      kind:
+                                        node.type === 'human' ? 'human' : 'machine',
+                                    })
+                                  }}
+                                />
                               </div>
                             </>
                           )}
@@ -2764,18 +3960,20 @@ export default function LoopGraphOverlay() {
                                   )
                                 })}
                               </div>
-                              {wiringLayout.slots.map((slot, slotIndex) => {
-                                const point = slotLocalPoint(
-                                  wiringLayout,
-                                  slotIndex,
-                                )
+                              {wiringLayout.groups.map((group) => {
+                                // One icon-aligned attach point per port —
+                                // all satellites of that port share it.
+                                const point = {
+                                  x: group.buttonX,
+                                  y: wiringLayout.height,
+                                }
                                 return (
                                   <span
-                                    key={slot.key}
+                                    key={`wiring-port:${group.port}`}
                                     className={`${styles.port} ${styles.portConfigHidden}`}
                                     style={{ left: point.x, top: point.y }}
-                                    data-loop-config-port={slot.port}
-                                    data-loop-config-slot={slot.key}
+                                    data-loop-config-port={group.port}
+                                    data-loop-config-slot={`${group.port}:attach`}
                                     aria-hidden
                                     onPointerDown={(event) => {
                                       event.stopPropagation()
@@ -2791,7 +3989,7 @@ export default function LoopGraphOverlay() {
                                           {
                                             sourcePort: 'n',
                                             targetPort: 's',
-                                            configPort: slot.port,
+                                            configPort: group.port,
                                             kind: 'provides',
                                           },
                                         ).then(() => setPointerWorld(null))
@@ -2828,12 +4026,205 @@ export default function LoopGraphOverlay() {
                         aria-hidden
                       >
                         <div className={styles.nodeWorkGroupMemberInner}>
-                          <span className={styles.nodeTitle}>
-                            {workGroupExitGhost.title}
-                          </span>
+                          <div className={styles.nodeTop}>
+                            <span className={styles.nodeTitle}>
+                              {workGroupExitGhost.title}
+                            </span>
+                          </div>
                         </div>
                       </div>
                     ) : null}
+                    {/* Above nodes — SVG edge foreignObjects sit under diamonds and were invisible. */}
+                    <div
+                      ref={branchLabelLayerRef}
+                      className={styles.branchLabelLayer}
+                      aria-hidden={false}
+                    >
+                      {draft.edges.map((edge) => {
+                        if (edge.kind === 'provides') return null
+                        const sourceNode = draft.nodes.find(
+                          (node) => node.id === edge.source,
+                        )
+                        if (!isDecisionBranchSourceNode(sourceNode)) return null
+                        if (
+                          !focusedWorkGroupId &&
+                          sourceNode.workGroupId &&
+                          draft.nodes.find((n) => n.id === edge.target)
+                            ?.workGroupId === sourceNode.workGroupId
+                        ) {
+                          return null
+                        }
+                        if (focusedWorkGroupId) {
+                          if (!nodeVisibleOnCanvas(sourceNode)) return null
+                          const targetNode = draft.nodes.find(
+                            (node) => node.id === edge.target,
+                          )
+                          if (
+                            targetNode &&
+                            !nodeVisibleOnCanvas(targetNode)
+                          ) {
+                            return null
+                          }
+                        }
+                        const batched = workflowEdgeRoutes.get(edge.id)
+                        const sourceSize = nodeBoxSize(
+                          sourceNode,
+                          draft,
+                          sizeOpts,
+                        )
+                        const sourceBox = {
+                          x: sourceNode.position.x,
+                          y: sourceNode.position.y,
+                          width: sourceSize.width,
+                          height: sourceSize.height,
+                        }
+                        const port =
+                          batched?.sourcePort ?? edge.sourcePort ?? 's'
+                        const anchor = batched
+                          ? decisionBranchLabelPoint(
+                              batched.points,
+                              sourceBox,
+                            )
+                          : (() => {
+                              // WG / unbatched edges: park outside the diamond by port.
+                              const cx =
+                                sourceBox.x + sourceBox.width / 2
+                              const cy =
+                                sourceBox.y + sourceBox.height / 2
+                              const gap = 18
+                              if (port === 's')
+                                return {
+                                  x: cx,
+                                  y: sourceBox.y + sourceBox.height + gap,
+                                }
+                              if (port === 'n')
+                                return { x: cx, y: sourceBox.y - gap }
+                              if (port === 'w')
+                                return { x: sourceBox.x - gap, y: cy }
+                              return {
+                                x: sourceBox.x + sourceBox.width + gap,
+                                y: cy,
+                              }
+                            })()
+                        const displayLabel = resolveDecisionBranchDisplayLabel(
+                          edge,
+                          (key) => ts(`chat.loopGraph.decisionBranch.${key}`),
+                        )
+                        return (
+                          <div
+                            key={`branch-label-${edge.id}`}
+                            className={styles.branchLabelAnchor}
+                            style={{ left: anchor.x, top: anchor.y }}
+                            data-loop-branch-label={edge.id}
+                          >
+                            {editingBranchEdgeId === edge.id &&
+                            phase === 'draw' ? (
+                              <input
+                                className={styles.branchLabelInput}
+                                value={editingBranchDraft}
+                                aria-label={ts(
+                                  'chat.loopGraph.decisionBranch.editHint',
+                                )}
+                                autoFocus
+                                onPointerDown={(event) =>
+                                  event.stopPropagation()
+                                }
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) =>
+                                  setEditingBranchDraft(event.target.value)
+                                }
+                                onBlur={() => {
+                                  const live =
+                                    useLoopGraphStore.getState().document
+                                      ?.draft ?? draft
+                                  const source =
+                                    live.nodes.find(
+                                      (node) => node.id === edge.source,
+                                    ) ?? sourceNode
+                                  const port =
+                                    workflowEdgeRoutes.get(edge.id)
+                                      ?.sourcePort ??
+                                    edge.sourcePort ??
+                                    's'
+                                  const fallbackLabel =
+                                    source &&
+                                    isDecisionBranchSourceNode(source)
+                                      ? decisionBranchPatchForPort(
+                                          port,
+                                          source,
+                                          (key) =>
+                                            ts(
+                                              `chat.loopGraph.decisionBranch.${key}`,
+                                            ),
+                                        ).branchLabel
+                                      : ts(
+                                          'chat.loopGraph.decisionBranch.placeholder',
+                                        )
+                                  const nextLabel =
+                                    editingBranchDraft.trim() ||
+                                    fallbackLabel ||
+                                    '…'
+                                  updateDraft({
+                                    ...live,
+                                    revision: live.revision + 1,
+                                    edges: live.edges.map((item) =>
+                                      item.id === edge.id
+                                        ? { ...item, branchLabel: nextLabel }
+                                        : item,
+                                    ),
+                                  })
+                                  setEditingBranchEdgeId(null)
+                                  setEditingBranchDraft('')
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Enter') {
+                                    event.preventDefault()
+                                    ;(
+                                      event.target as HTMLInputElement
+                                    ).blur()
+                                  }
+                                  if (event.key === 'Escape') {
+                                    event.preventDefault()
+                                    setEditingBranchEdgeId(null)
+                                    setEditingBranchDraft('')
+                                  }
+                                  event.stopPropagation()
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                className={`${styles.branchLabelChip} ${
+                                  !displayLabel
+                                    ? styles.branchLabelChipPending
+                                    : ''
+                                }`}
+                                title={ts(
+                                  'chat.loopGraph.decisionBranch.editHint',
+                                )}
+                                tabIndex={phase === 'draw' ? 0 : -1}
+                                onPointerDown={(event) => {
+                                  if (phase !== 'draw' || event.button !== 0)
+                                    return
+                                  event.stopPropagation()
+                                }}
+                                onClick={(event) => {
+                                  if (phase !== 'draw') return
+                                  event.stopPropagation()
+                                  setEditingBranchEdgeId(edge.id)
+                                  setEditingBranchDraft(displayLabel)
+                                }}
+                              >
+                                {displayLabel ||
+                                  ts(
+                                    'chat.loopGraph.decisionBranch.placeholder',
+                                  )}
+                              </button>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
                   </div>
                   </>
                 )}
@@ -2891,9 +4282,114 @@ export default function LoopGraphOverlay() {
                 <LoopRunMaterialsPanel />
                 {activeInstance?.status === 'awaiting_hitl' ? (
                   <div className={styles.hitlActions}>
+                    {(() => {
+                      const cursorId = activeInstance.cursorNodeId
+                      const cursorDraft = cursorId
+                        ? draft.nodes.find((item) => item.id === cursorId)
+                        : undefined
+                      const cursorSpec =
+                        document?.approvedSpecs
+                          .find(
+                            (spec) =>
+                              spec.version === activeInstance.specVersion,
+                          )
+                          ?.nodes.find((item) => item.id === cursorId) ?? null
+                      const cursorRecord = activeInstance.nodeRecords?.find(
+                        (item) => item.nodeId === cursorId,
+                      )
+                      const cursorProgress = cursorRecord?.dutyProgress
+                      const runtimeItems = cursorRecord?.dutyItems
+                      const dutyReady = runtimeItems?.length
+                        ? areRequiredDutiesComplete(
+                            runtimeItems.map((item) => ({
+                              id: item.id,
+                              required: item.required !== false,
+                            })),
+                            cursorProgress,
+                          )
+                        : cursorSpec
+                          ? areRequiredDutiesComplete(
+                              cursorSpec.acceptance.map((item) => ({
+                                id: item.id,
+                                required: true,
+                              })),
+                              cursorProgress,
+                            )
+                          : true
+                      return cursorDraft &&
+                        (cursorDraft.type === 'human' || cursorDraft.humanMode) ? (
+                        <div className={styles.hitlDutyBlock}>
+                          <div className={styles.runEvent}>
+                            {ts('chat.loopGraph.dutyChecklist')}
+                          </div>
+                          <LoopNodeDutyChecklist
+                            node={cursorDraft}
+                            specNode={cursorSpec}
+                            runtimeItems={runtimeItems}
+                            progress={cursorProgress}
+                            compact={false}
+                            interactive
+                            allowAdd
+                            onToggle={(itemId, status) => {
+                              void patchDutyProgress(
+                                cursorDraft.id,
+                                itemId,
+                                status,
+                              )
+                            }}
+                            onAdd={(text) => {
+                              void mutateDutyChecklist(cursorDraft.id, {
+                                op: 'add',
+                                text,
+                                kind: 'human',
+                              })
+                            }}
+                          />
+                          {!dutyReady ? (
+                            <p className={styles.hitlDutyHint}>
+                              {ts('chat.loopGraph.dutyReleaseBlocked')}
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null
+                    })()}
                     {(activeInstance.hitlQuestionIds ?? ['continue']).map((questionId) => {
                       const isApproval = questionId.includes('approval')
                       const isReview = questionId.includes('review')
+                      const isHumanGate =
+                        questionId.startsWith('human_') ||
+                        questionId.startsWith('decide_')
+                      const cursorId = activeInstance.cursorNodeId
+                      const cursorSpec =
+                        document?.approvedSpecs
+                          .find(
+                            (spec) =>
+                              spec.version === activeInstance.specVersion,
+                          )
+                          ?.nodes.find((item) => item.id === cursorId) ?? null
+                      const cursorRecord = activeInstance.nodeRecords?.find(
+                        (item) => item.nodeId === cursorId,
+                      )
+                      const cursorProgress = cursorRecord?.dutyProgress
+                      const runtimeItems = cursorRecord?.dutyItems
+                      const dutyReady =
+                        !isHumanGate ||
+                        (runtimeItems?.length
+                          ? areRequiredDutiesComplete(
+                              runtimeItems.map((item) => ({
+                                id: item.id,
+                                required: item.required !== false,
+                              })),
+                              cursorProgress,
+                            )
+                          : !cursorSpec ||
+                            areRequiredDutiesComplete(
+                              cursorSpec.acceptance.map((item) => ({
+                                id: item.id,
+                                required: true,
+                              })),
+                              cursorProgress,
+                            ))
                       return (
                         <div key={questionId} className={styles.hitlGroup}>
                           <div className={styles.runEvent}>{questionId}</div>
@@ -2903,17 +4399,26 @@ export default function LoopGraphOverlay() {
                                 type="button"
                                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
                                 data-loop-hitl-approve=""
+                                disabled={!dutyReady}
+                                title={
+                                  dutyReady
+                                    ? undefined
+                                    : ts('chat.loopGraph.dutyReleaseBlocked')
+                                }
                                 onClick={() =>
                                   void resolveHitl([
                                     {
                                       questionId,
                                       answer: 'approve',
-                                      editedPayload: { approved: true },
+                                      editedPayload: {
+                                        approved: true,
+                                        requireDutyComplete: true,
+                                      },
                                     },
                                   ])
                                 }
                               >
-                                {ts('chat.loopGraph.hitlApprove')}
+                                {ts('chat.loopGraph.hitlConfirmRelease')}
                               </button>
                               <button
                                 type="button"
@@ -2948,11 +4453,23 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                disabled={!dutyReady}
+                                title={
+                                  dutyReady
+                                    ? undefined
+                                    : ts('chat.loopGraph.dutyReleaseBlocked')
+                                }
                                 onClick={() =>
-                                  void resolveHitl([{ questionId, answer: 'accept' }])
+                                  void resolveHitl([
+                                    {
+                                      questionId,
+                                      answer: 'accept',
+                                      editedPayload: { requireDutyComplete: true },
+                                    },
+                                  ])
                                 }
                               >
-                                {ts('chat.loopGraph.hitlAccept')}
+                                {ts('chat.loopGraph.hitlConfirmRelease')}
                               </button>
                               <button
                                 type="button"
@@ -2981,11 +4498,31 @@ export default function LoopGraphOverlay() {
                               <button
                                 type="button"
                                 className={`${styles.actionButton} ${styles.actionButtonPrimary}`}
+                                disabled={!dutyReady}
+                                title={
+                                  dutyReady
+                                    ? undefined
+                                    : ts('chat.loopGraph.dutyReleaseBlocked')
+                                }
                                 onClick={() =>
-                                  void resolveHitl([{ questionId, answer: 'continue' }])
+                                  void resolveHitl([
+                                    {
+                                      questionId,
+                                      answer: 'continue',
+                                      ...(isHumanGate
+                                        ? {
+                                            editedPayload: {
+                                              requireDutyComplete: true,
+                                            },
+                                          }
+                                        : {}),
+                                    },
+                                  ])
                                 }
                               >
-                                {ts('chat.loopGraph.hitlContinue')}
+                                {isHumanGate
+                                  ? ts('chat.loopGraph.hitlConfirmRelease')
+                                  : ts('chat.loopGraph.hitlContinue')}
                               </button>
                             </>
                           ) : null}
@@ -3002,6 +4539,43 @@ export default function LoopGraphOverlay() {
                 ) : null}
               </div>
             ) : null}
+            {phase === 'draw' && selectedLayerId && !selectedWorkGroupId
+              ? (() => {
+                  const selectedLayer = layers.find(
+                    (layer) => layer.id === selectedLayerId,
+                  )
+                  if (!selectedLayer) return null
+                  const members = selectedLayer.memberNodeIds
+                    .map((id) => draft.nodes.find((node) => node.id === id))
+                    .filter((node): node is IntentGraphNode => Boolean(node))
+                  return (
+                    <div className={styles.workGroupPanel} data-loop-layer-panel="">
+                      <h3 className={styles.workGroupPanelTitle}>
+                        {ts('chat.loopGraph.layer.panelTitle')}: {selectedLayer.title}
+                      </h3>
+                      <div className={styles.workGroupPanelRow}>
+                        <span className={styles.workGroupPanelLabel}>
+                          {ts('chat.loopGraph.layer.members')}
+                        </span>
+                        <ul className={styles.layerMemberList}>
+                          {members.map((node) => (
+                            <li key={node.id}>
+                              {node.title || ts('chat.loopGraph.untitledNode')}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                      <button
+                        type="button"
+                        className={styles.workGroupPanelDissolve}
+                        onClick={() => dissolveLayer(selectedLayer.id)}
+                      >
+                        {ts('chat.loopGraph.layer.dissolve')}
+                      </button>
+                    </div>
+                  )
+                })()
+              : null}
             {phase === 'draw' && selectedWorkGroupId
               ? (() => {
                   const selectedGroup = workGroups.find(
@@ -3011,11 +4585,52 @@ export default function LoopGraphOverlay() {
                   const members = selectedGroup.memberNodeIds
                     .map((id) => draft.nodes.find((node) => node.id === id))
                     .filter((node): node is IntentGraphNode => Boolean(node))
+                  const departmentName = selectedGroup.departmentTemplateId
+                    ? getLoopDepartmentTemplate(selectedGroup.departmentTemplateId)
+                        ?.title ?? null
+                    : null
+                  const taskValue = resolveLoopWorkGroupTaskTitle(
+                    selectedGroup,
+                    departmentName,
+                  )
                   return (
                     <div className={styles.workGroupPanel} data-loop-work-group-panel="">
                       <h3 className={styles.workGroupPanelTitle}>
                         {selectedGroup.title}
                       </h3>
+                      {departmentName ? (
+                        <div className={styles.workGroupPanelRow}>
+                          <span className={styles.workGroupPanelLabel}>
+                            {ts('chat.loopGraph.workGroup.departmentLabel')}
+                          </span>
+                          <span className={styles.workGroupPanelValue}>
+                            {departmentName}
+                          </span>
+                        </div>
+                      ) : null}
+                      <div className={styles.workGroupPanelRow}>
+                        <label
+                          className={styles.workGroupPanelLabel}
+                          htmlFor="loop-wg-task"
+                        >
+                          {ts('chat.loopGraph.workGroup.taskLabel')}
+                        </label>
+                        <input
+                          id="loop-wg-task"
+                          className={styles.workGroupPanelSelect}
+                          value={taskValue}
+                          placeholder={
+                            departmentName
+                              ? ts(
+                                  'chat.loopGraph.workGroup.taskPlaceholderDepartment',
+                                )
+                              : ts('chat.loopGraph.workGroup.taskPlaceholder')
+                          }
+                          onChange={(event) =>
+                            renameWorkGroup(selectedGroup.id, event.target.value)
+                          }
+                        />
+                      </div>
                       <div className={styles.workGroupPanelRow}>
                         <label className={styles.workGroupPanelLabel} htmlFor="loop-wg-mode">
                           {ts('chat.loopGraph.workGroup.mode.label')}
@@ -3048,7 +4663,7 @@ export default function LoopGraphOverlay() {
                             className={styles.workGroupPanelLabel}
                             htmlFor="loop-wg-coordinator"
                           >
-                            {ts('chat.loopGraph.workGroup.coordinator')}
+                            {ts('chat.loopGraph.workGroup.supervisor')}
                           </label>
                           <select
                             id="loop-wg-coordinator"
@@ -3067,14 +4682,158 @@ export default function LoopGraphOverlay() {
                               </option>
                             ))}
                           </select>
+                          <p className={styles.workGroupPanelHint}>
+                            {ts('chat.loopGraph.workGroup.supervisorHint')}
+                          </p>
                         </div>
+                      ) : null}
+                      <div className={styles.workGroupPanelRow}>
+                        <span className={styles.workGroupPanelLabel}>
+                          {ts('chat.loopGraph.workGroup.staffing.title')}
+                        </span>
+                        <select
+                          className={styles.workGroupPanelSelect}
+                          value={staffingPaletteId}
+                          onChange={(event) =>
+                            setStaffingPaletteId(event.target.value)
+                          }
+                          aria-label={ts(
+                            'chat.loopGraph.workGroup.staffing.pickSpecialist',
+                          )}
+                        >
+                          <option value="">
+                            {ts(
+                              'chat.loopGraph.workGroup.staffing.autoSuggest',
+                            )}
+                          </option>
+                          {staffablePaletteIds.map((paletteId) => {
+                            const item = LOOP_PALETTE_ITEMS.find(
+                              (entry) => entry.id === paletteId,
+                            )
+                            return (
+                              <option key={paletteId} value={paletteId}>
+                                {item?.title ?? paletteId}
+                              </option>
+                            )
+                          })}
+                        </select>
+                        <textarea
+                          className={styles.workGroupPanelTextarea}
+                          rows={2}
+                          value={staffingReason}
+                          placeholder={ts(
+                            'chat.loopGraph.workGroup.staffing.reasonPlaceholder',
+                          )}
+                          onChange={(event) =>
+                            setStaffingReason(event.target.value)
+                          }
+                        />
+                        <button
+                          type="button"
+                          className={styles.workGroupPanelAction}
+                          onClick={() => {
+                            const proposalId = proposeWorkGroupStaffing(
+                              selectedGroup.id,
+                              {
+                                reason:
+                                  staffingReason.trim() ||
+                                  ts(
+                                    'chat.loopGraph.workGroup.staffing.defaultReason',
+                                  ),
+                                ...(staffingPaletteId
+                                  ? {
+                                      suggestedPaletteItemId: staffingPaletteId,
+                                    }
+                                  : {}),
+                                ...(selectedGroup.coordinatorNodeId
+                                  ? {
+                                      requestedByNodeId:
+                                        selectedGroup.coordinatorNodeId,
+                                    }
+                                  : {}),
+                              },
+                            )
+                            if (proposalId) {
+                              setStaffingReason('')
+                              setStaffingPaletteId('')
+                            }
+                          }}
+                        >
+                          {ts('chat.loopGraph.workGroup.staffing.propose')}
+                        </button>
+                      </div>
+                      {(selectedGroup.staffingProposals ?? []).filter(
+                        (item) => item.status === 'pending',
+                      ).length > 0 ? (
+                        <ul className={styles.workGroupStaffingList}>
+                          {(selectedGroup.staffingProposals ?? [])
+                            .filter((item) => item.status === 'pending')
+                            .map((proposal) => {
+                              const label =
+                                proposal.suggestedTitle ??
+                                LOOP_PALETTE_ITEMS.find(
+                                  (entry) =>
+                                    entry.id ===
+                                    proposal.suggestedPaletteItemId,
+                                )?.title ??
+                                proposal.suggestedPaletteItemId ??
+                                'Specialist'
+                              return (
+                                <li
+                                  key={proposal.id}
+                                  className={styles.workGroupStaffingItem}
+                                >
+                                  <div className={styles.workGroupStaffingMeta}>
+                                    <strong>{label}</strong>
+                                    <span>{proposal.reason}</span>
+                                  </div>
+                                  <div
+                                    className={styles.workGroupStaffingActions}
+                                  >
+                                    <button
+                                      type="button"
+                                      className={styles.workGroupPanelAction}
+                                      onClick={() => {
+                                        void confirmWorkGroupStaffingProposal(
+                                          selectedGroup.id,
+                                          proposal.id,
+                                        )
+                                      }}
+                                    >
+                                      {ts(
+                                        'chat.loopGraph.workGroup.staffing.accept',
+                                      )}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={styles.workGroupPanelGhost}
+                                      onClick={() =>
+                                        dismissWorkGroupStaffingProposal(
+                                          selectedGroup.id,
+                                          proposal.id,
+                                        )
+                                      }
+                                    >
+                                      {ts(
+                                        'chat.loopGraph.workGroup.staffing.dismiss',
+                                      )}
+                                    </button>
+                                  </div>
+                                </li>
+                              )
+                            })}
+                        </ul>
                       ) : null}
                       <button
                         type="button"
                         className={styles.workGroupPanelDissolve}
                         onClick={() => dissolveWorkGroup(selectedGroup.id)}
                       >
-                        {ts('chat.loopGraph.workGroup.dissolve')}
+                        {ts(
+                          selectedGroup.departmentTemplateId
+                            ? 'chat.loopGraph.workGroup.deleteDepartment'
+                            : 'chat.loopGraph.workGroup.dissolve',
+                        )}
                       </button>
                     </div>
                   )
@@ -3094,8 +4853,12 @@ export default function LoopGraphOverlay() {
                 const rect = canvasRef.current?.getBoundingClientRect()
                 if (!rect) return { x: 80, y: 80 }
                 return {
-                  x: (rect.width / 2 - viewport.x) / viewport.scale,
-                  y: (rect.height / 2 - viewport.y) / viewport.scale,
+                  x:
+                    (rect.width / 2 - viewportRef.current.x) /
+                    viewportRef.current.scale,
+                  y:
+                    (rect.height / 2 - viewportRef.current.y) /
+                    viewportRef.current.scale,
                 }
               }}
             />
@@ -3111,6 +4874,11 @@ export default function LoopGraphOverlay() {
           beginCreateAgentComposer('loop')
           void setComposerMode('create_agent')
         }}
+        onCreateStageLayer={
+          phase === 'draw' && !focusedWorkGroupId
+            ? armCreateStageLayer
+            : undefined
+        }
         onConnectFrom={(nodeId) => startConnectFrom(nodeId)}
         onOpenDuty={openDutyCard}
         onSwitchAgent={(nodeId, anchor) => {
@@ -3157,10 +4925,51 @@ export default function LoopGraphOverlay() {
             <LoopConfigAssetPicker
               kind={wiringPicker.kind}
               anchor={wiringPicker.anchor}
+              connectedIds={(() => {
+                if (
+                  wiringPicker.kind === 'mcp' ||
+                  wiringPicker.kind === 'skill'
+                ) {
+                  return connectedWiringAssetIds(
+                    wiringPicker.agentNodeId,
+                    wiringPicker.kind,
+                    draft,
+                  )
+                }
+                // Model: single profile from a provides model satellite.
+                const ids: string[] = []
+                for (const edge of draft.edges) {
+                  if (
+                    edge.kind !== 'provides' ||
+                    edge.target !== wiringPicker.agentNodeId
+                  ) {
+                    continue
+                  }
+                  const source = draft.nodes.find(
+                    (node) => node.id === edge.source,
+                  )
+                  const modelId = source?.configRef?.modelProfileId
+                  if (source?.satelliteKind === 'model' && modelId) {
+                    ids.push(modelId)
+                  }
+                }
+                return ids
+              })()}
               onCancel={() => setWiringPicker(null)}
               onPick={(asset) => {
                 const agentNodeId = wiringPicker.agentNodeId
                 setWiringPicker(null)
+                if (
+                  (asset.kind === 'mcp' || asset.kind === 'skill') &&
+                  connectedWiringAssetIds(
+                    agentNodeId,
+                    asset.kind,
+                    draft,
+                  ).includes(asset.id)
+                ) {
+                  // Already wired — checkmark is informational; skip duplicate.
+                  return
+                }
                 void placeWiredAsset(agentNodeId, asset)
               }}
             />,
@@ -3199,6 +5008,47 @@ export default function LoopGraphOverlay() {
             />,
             globalThis.document.body,
           )
+        : null}
+
+      {wiringListPopover
+        ? (() => {
+            const listNode = draft.nodes.find(
+              (node) => node.id === wiringListPopover.listNodeId,
+            )
+            if (!listNode || !isWiringListKind(listNode.satelliteKind)) {
+              return null
+            }
+            const members = wiringListMembersOf(listNode)
+            return createPortal(
+              <LoopWiringListPopover
+                kind={wiringListPopover.kind}
+                title={listNode.title || visualForIntentNode(listNode).shortLabel}
+                members={members}
+                anchor={wiringListPopover.anchor}
+                onClose={() => setWiringListPopover(null)}
+                onRemove={(memberId) => {
+                  removeWiringListMember(listNode.id, memberId)
+                  // List may expand/delete after normalize — close if gone.
+                  const next = useLoopGraphStore.getState().document?.draft
+                  const still = next?.nodes.find((node) => node.id === listNode.id)
+                  if (!still || !isWiringListKind(still.satelliteKind)) {
+                    setWiringListPopover(null)
+                  }
+                }}
+                onAdd={() => {
+                  setWiringListPopover(null)
+                  const agent = findProvidesAgentForSatellite(listNode.id, draft)
+                  if (!agent) return
+                  setWiringPicker({
+                    agentNodeId: agent.id,
+                    kind: wiringListPopover.kind,
+                    anchor: wiringListPopover.anchor,
+                  })
+                }}
+              />,
+              globalThis.document.body,
+            )
+          })()
         : null}
 
       {switchAgentMenu

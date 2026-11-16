@@ -8,14 +8,17 @@ import {
   getIntentGraphCompileIssues,
   headFromLoopDocument,
   isIntentGraphReadyForCompile,
+  mutateDutyItems,
   normalizeLoopGraphDocument,
   pushIntentGraphHistory,
   summarizeGoalContextForGraphPrompt,
+  syncDutyProgressWithItems,
   trimLoopInstanceEvents,
   validateLoopSpecTopology,
   type LoopAuthoringTurnRequest,
   type LoopCompileResult,
   type LoopComposerMode,
+  type LoopDutyChecklistMutateOp,
   type LoopGoalClarificationAnswer,
   type LoopGraphDocument,
   type LoopGraphHead,
@@ -564,6 +567,103 @@ export function mockResolveLoopHitl(
       instanceId,
     ),
   );
+}
+
+export function mockMutateLoopDutyChecklist(
+  projectId: string,
+  loopId: string,
+  instanceId: string,
+  input: {
+    nodeId: string;
+    mutate: LoopDutyChecklistMutateOp;
+  },
+): LoopGraphDocument {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const at = new Date().toISOString();
+  const records = [...(instance.nodeRecords ?? [])];
+  const index = records.findIndex((item) => item.nodeId === input.nodeId);
+  const prev = index >= 0 ? records[index] : undefined;
+  const base =
+    prev?.dutyItems && prev.dutyItems.length > 0
+      ? prev.dutyItems
+      : [{ id: `duty_${input.nodeId}`, text: "Complete node", kind: "machine" as const, required: true }];
+  const dutyItems = mutateDutyItems(base, input.mutate);
+  const dutyProgress = syncDutyProgressWithItems(dutyItems, prev?.dutyProgress, at);
+  const nextRecord = {
+    nodeId: input.nodeId,
+    status: prev?.status ?? ("running" as const),
+    updatedAt: at,
+    dutyItems,
+    dutyProgress,
+  };
+  if (index >= 0) records[index] = nextRecord;
+  else records.push(nextRecord);
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    instances: doc.instances.map((item) =>
+      item.id === instanceId
+        ? { ...item, nodeRecords: records, updatedAt: at }
+        : item,
+    ),
+  });
+}
+
+export function mockPatchLoopDutyProgress(
+  projectId: string,
+  loopId: string,
+  instanceId: string,
+  input: {
+    nodeId: string;
+    itemId: string;
+    status: "pending" | "done" | "blocked" | "skipped";
+  },
+): LoopGraphDocument {
+  const doc = mockGetLoopGraph(projectId, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const at = new Date().toISOString();
+  const records = [...(instance.nodeRecords ?? [])];
+  const index = records.findIndex((item) => item.nodeId === input.nodeId);
+  const prev = index >= 0 ? records[index] : undefined;
+  const progress = [...(prev?.dutyProgress ?? [])];
+  const progressIndex = progress.findIndex(
+    (item) =>
+      item.id === input.itemId ||
+      item.id === input.itemId.replace(/^acc_/, "") ||
+      `acc_${item.id}` === input.itemId,
+  );
+  if (progressIndex >= 0) {
+    progress[progressIndex] = {
+      ...progress[progressIndex]!,
+      status: input.status,
+      updatedAt: at,
+    };
+  } else {
+    progress.push({ id: input.itemId, status: input.status, updatedAt: at });
+  }
+  const nextRecord = {
+    nodeId: input.nodeId,
+    status: prev?.status ?? ("waiting_approval" as const),
+    updatedAt: at,
+    ...(prev?.agentRunId ? { agentRunId: prev.agentRunId } : {}),
+    ...(prev?.evidenceId ? { evidenceId: prev.evidenceId } : {}),
+    ...(prev?.artifactIds ? { artifactIds: prev.artifactIds } : {}),
+    dutyProgress: progress,
+  };
+  if (index >= 0) records[index] = nextRecord;
+  else records.push(nextRecord);
+  return mockUpsertLoopGraph(projectId, {
+    ...doc,
+    instances: doc.instances.map((item) =>
+      item.id === instanceId
+        ? { ...item, nodeRecords: records, updatedAt: at }
+        : item,
+    ),
+  });
 }
 
 export function mockGetLoopInstanceEvents(

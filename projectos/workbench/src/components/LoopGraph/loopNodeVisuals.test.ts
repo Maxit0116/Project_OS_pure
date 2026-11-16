@@ -11,11 +11,24 @@ import {
 } from './loopNodeVisuals'
 
 describe('loopNodeVisuals', () => {
+  it('maps department palette ids to the department visual', () => {
+    expect(
+      visualForPaletteItem({
+        id: 'workgroup.department.product-architecture',
+      }).key,
+    ).toBe('workgroup.department')
+    expect(visualForPaletteItem({ id: 'workgroup.create' }).key).toBe(
+      'workgroup.create',
+    )
+  })
+
   it('maps every built-in palette id to a distinct non-draft visual', () => {
     const ids = [
-      'agent.planner',
-      'agent.coder',
-      'agent.reviewer',
+      'agent.workforce',
+      'agent.specialist',
+      'agent.curated.product-planner',
+      'agent.curated.frontend-engineer',
+      'agent.curated.code-reviewer',
       'action.test',
       'action.github.create_pr',
       'action.github.create_branch',
@@ -32,7 +45,19 @@ describe('loopNodeVisuals', () => {
       'human.review',
       'human.input',
     ] as const
-    const keys = ids.map((id) => visualForPaletteItem({ id }).key)
+    const keys = ids.map((id) =>
+      visualForPaletteItem({
+        id,
+        seed:
+          id === 'agent.curated.product-planner'
+            ? { type: 'agent', agentRole: 'planner' }
+            : id === 'agent.curated.frontend-engineer'
+              ? { type: 'agent', agentRole: 'coder' }
+              : id === 'agent.curated.code-reviewer'
+                ? { type: 'agent', agentRole: 'reviewer' }
+                : undefined,
+      }).key,
+    )
     expect(new Set(keys).size).toBe(ids.length)
     expect(keys.every((key) => key !== 'draft')).toBe(true)
   })
@@ -121,8 +146,8 @@ describe('loopNodeVisuals', () => {
   })
 
   it('round-trips palette drag payload', () => {
-    const raw = encodePaletteDragPayload('agent.coder')
-    expect(decodePaletteDragPayload(raw)).toBe('agent.coder')
+    const raw = encodePaletteDragPayload('agent.curated.frontend-engineer')
+    expect(decodePaletteDragPayload(raw)).toBe('agent.curated.frontend-engineer')
     expect(decodePaletteDragPayload('not-json')).toBeNull()
   })
 })

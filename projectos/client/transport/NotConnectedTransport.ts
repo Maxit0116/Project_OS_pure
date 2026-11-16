@@ -1778,6 +1778,31 @@ export class NotConnectedTransport implements ProjectOSApi {
     return transportNotConnected();
   }
 
+  async patchLoopDutyProgress(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+    _input: {
+      nodeId: string;
+      itemId: string;
+      status: import("../../contracts/loop-graph.js").LoopDutyItemStatus;
+    },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
+  async mutateLoopDutyChecklist(
+    _projectId: string,
+    _loopId: string,
+    _instanceId: string,
+    _input: {
+      nodeId: string;
+      mutate: import("../../contracts/loop-graph.js").LoopDutyChecklistMutateOp;
+    },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return transportNotConnected();
+  }
+
   async getLoopInstanceEvents(
     _projectId: string,
     _loopId: string,

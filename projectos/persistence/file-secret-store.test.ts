@@ -193,6 +193,32 @@ describe("secrets encrypted at rest", () => {
     expect(statSync(join(dir, "secrets.json")).mode & 0o777).toBe(0o600);
   });
 
+  it("answers presence checks and missing refs without touching the cipher (Keychain)", async () => {
+    const dir = temp();
+    writeFileSync(
+      join(dir, "secrets.json"),
+      JSON.stringify({
+        secrets: {},
+        encrypted: { "github_auth:default": Buffer.from(`enc:${KEY}`).toString("base64") },
+      }),
+    );
+    let decrypts = 0;
+    const cipher = fakeCipher();
+    const store = new FileSecretStore(dir, {
+      ...cipher,
+      decrypt: (cipherText: string) => {
+        decrypts += 1;
+        return cipher.decrypt(cipherText);
+      },
+    });
+    expect(await store.has("github_auth:default")).toBe(true);
+    expect(await store.has("google_auth:default")).toBe(false);
+    expect(await store.get("github:oauth")).toBeUndefined();
+    expect(decrypts).toBe(0);
+    expect(await store.get("github_auth:default")).toBe(KEY);
+    expect(decrypts).toBe(1);
+  });
+
   it("accepts cipher via options object alongside readOnly", async () => {
     const dir = temp();
     writeFileSync(

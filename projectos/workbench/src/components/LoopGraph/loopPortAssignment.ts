@@ -17,8 +17,6 @@ import {
 } from '@contracts/index'
 import { isDiamondLoopNode } from './loopNodeVisuals'
 import {
-  LOOP_NODE_H,
-  LOOP_NODE_W,
   nearestPort,
   portPoint,
   type Point,

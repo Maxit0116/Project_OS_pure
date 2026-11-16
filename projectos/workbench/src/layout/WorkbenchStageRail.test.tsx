@@ -7,7 +7,9 @@ describe('WorkbenchStageRail', () => {
   it('renders a collapsed horizontal stage toolbar with views and graphs', () => {
     const html = renderToStaticMarkup(<WorkbenchStageRail />)
     expect(html).toContain('data-workbench-stage-rail')
+    expect(html).toContain('data-workbench-stage-rail-reach')
     expect(html).toContain('data-revealed="false"')
+    expect(html).toContain('aria-hidden')
     expect(html).toContain('role="toolbar"')
     expect(html).toContain('role="separator"')
     expect(html).toContain('aria-label="功能地图"')

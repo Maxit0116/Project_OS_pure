@@ -2,7 +2,9 @@ import { randomUUID } from "node:crypto";
 
 import {
   LoopCompileResultSchema,
+  dutyItemsToAcceptance,
   isConfigNode,
+  resolveDutyItems,
   suggestIntentEdgeKind,
   suggestIntentNodeRole,
   withArchitectureDefaults,
@@ -18,7 +20,6 @@ import {
 } from "../contracts/loop-graph.js";
 import {
   expandWorkGroupInternalEdges,
-  inferWorkGroupPort,
   isWorkGroupEndpoint,
   listWorkGroupSurfaceAgentIds,
   resolveWorkGroupEntryNodeId,
@@ -42,9 +43,6 @@ function compileSpecNode(
 ): LoopSpecNode {
   const arch = withArchitectureDefaults(node);
   const role = inferRole(node);
-  const isTestAction =
-    arch.type === "action" && arch.actionIntegration === "test";
-  const isVerify = role === "verify" || isTestAction;
   const isAgent = (arch.type ?? "agent") === "agent";
   const resolvedWiring = isAgent
     ? toWiringOverride(resolveAgentWiring(node, draft))
@@ -55,6 +53,15 @@ function compileSpecNode(
       (resolvedWiring.skillIds && resolvedWiring.skillIds.length > 0) ||
       (resolvedWiring.mcpServerIds && resolvedWiring.mcpServerIds.length > 0) ||
       resolvedWiring.memoryMode);
+  const dutyItems = resolveDutyItems({
+    id: node.id,
+    title: node.title,
+    prompt: node.prompt,
+    ...(node.dutyItems ? { dutyItems: node.dutyItems } : {}),
+    ...(arch.type ? { type: arch.type } : {}),
+    ...(arch.humanMode ? { humanMode: arch.humanMode } : {}),
+  });
+  const goalFromDuty = dutyItems.map((item) => item.text).join("; ");
   return {
     id: node.id,
     role,
@@ -77,17 +84,15 @@ function compileSpecNode(
     ...(arch.repairMode ? { repairMode: true } : {}),
     ...(hasWiring ? { resolvedWiring } : {}),
     ...(node.workGroupId ? { workGroupId: node.workGroupId } : {}),
-    goal: node.prompt.trim() || node.title,
+    ...(typeof node.waitMs === "number" ? { waitMs: node.waitMs } : {}),
+    ...(node.scheduleMode ? { scheduleMode: node.scheduleMode } : {}),
+    ...(node.scheduleAt ? { scheduleAt: node.scheduleAt } : {}),
+    ...(node.actionParams ? { actionParams: node.actionParams } : {}),
+    goal: node.prompt.trim() || goalFromDuty || node.title,
     constraints: [],
     inputs: [],
     outputs: [],
-    acceptance: [
-      {
-        id: `acc_${node.id}`,
-        description: isVerify ? `Verify: ${node.title}` : `Complete: ${node.title}`,
-        kind: isVerify ? "machine" : "human",
-      },
-    ],
+    acceptance: dutyItemsToAcceptance(dutyItems),
   };
 }
 
@@ -123,18 +128,17 @@ function rewriteWorkGroupBoundaryEdges(
     let fromIds = [edge.source];
     let toIds = [edge.target];
 
+    // Geometric workGroupPort (n/e/s/w) is canvas attachment only.
+    // Boundary rewrite always uses exit members when the group is the source
+    // and entry/join members when it is the target.
     if (sourceIsGroup) {
       const group = groupsById.get(edge.source);
       if (!group) continue;
-      const port = inferWorkGroupPort("source", edge.workGroupPort);
-      if (port !== "out") continue;
       fromIds = resolveWorkGroupExitNodeIds(group, draft.nodes);
     }
     if (targetIsGroup) {
       const group = groupsById.get(edge.target);
       if (!group) continue;
-      const port = inferWorkGroupPort("target", edge.workGroupPort);
-      if (port !== "in") continue;
       if (group.collaborationMode === "parallel_join") {
         toIds = listWorkGroupSurfaceAgentIds(group, draft.nodes);
       } else {

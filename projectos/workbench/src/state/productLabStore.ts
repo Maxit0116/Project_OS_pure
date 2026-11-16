@@ -38,6 +38,7 @@ import { buildLabJourneyPlan } from './buildLabJourneyPlan'
 import { useBottomDockStore } from './bottomDockStore'
 import { useBrowserStore } from './browserStore'
 import { useChatSessionStore } from './chatSessionStore'
+import { useLoopGraphStore } from './loopGraphStore'
 import { useTerminalStore } from './terminalStore'
 import { useWorkbenchStore } from './workbenchStore'
 
@@ -470,6 +471,19 @@ interface ProductLabStore {
   /** Top-bar entry: start or focus Lab (zero prompt). */
   toggleOrStartLab: () => Promise<void>
   startLab: () => Promise<void>
+  /** Open Lab from a Loop Lab Action with upstream acceptance checklist. */
+  startLabFromLoop: (input: {
+    loopId: string
+    instanceId: string
+    nodeId: string
+    acceptance: Array<{
+      id: string
+      text: string
+      required: boolean
+      sourceNodeId?: string
+    }>
+  }) => Promise<{ ok: boolean; sessionId?: string; message?: string }>
+  toggleAcceptanceItem: (itemId: string, done: boolean) => Promise<void>
   endLab: () => Promise<void>
   focusLabSurfaces: () => Promise<void>
 
@@ -789,6 +803,87 @@ export const useProductLabStore = create<ProductLabStore>((set, get) => ({
         busy: false,
         error: error instanceof Error ? error.message : String(error),
       })
+    }
+  },
+
+  startLabFromLoop: async (input) => {
+    const ctx = projectClient()
+    if (!ctx) {
+      return { ok: false, message: 'Open a workspace before Lab verification' }
+    }
+    try {
+      const chatSessionId = await openLabChatSession()
+      const started = startLabSession(get().document, {
+        projectId: ctx.projectId,
+        acceptanceChecklist: input.acceptance.map((item) => ({
+          id: item.id,
+          text: item.text,
+          required: item.required,
+          done: false,
+          ...(item.sourceNodeId ? { sourceNodeId: item.sourceNodeId } : {}),
+        })),
+        loopBinding: {
+          loopId: input.loopId,
+          instanceId: input.instanceId,
+          nodeId: input.nodeId,
+        },
+      })
+      let document = patchLabSession(started.document, started.session.id, {
+        status: 'experiencing',
+        cardPhase: 'experiencing',
+        chatSessionId,
+      })
+      set({
+        ...withDerived(document),
+        busy: false,
+        findingsOpen: true,
+        noteDraft: '',
+        draftDebugListIds: [],
+      })
+      document = await persist(document)
+      set({ ...withDerived(document) })
+      await ensureLabChatSession(started.session.id)
+      return { ok: true, sessionId: started.session.id }
+    } catch (error) {
+      return {
+        ok: false,
+        message: error instanceof Error ? error.message : 'Lab start failed',
+      }
+    }
+  },
+
+  toggleAcceptanceItem: async (itemId, done) => {
+    const session = get().activeSession()
+    if (!session?.acceptanceChecklist) return
+    const nextList = session.acceptanceChecklist.map((item) =>
+      item.id === itemId ? { ...item, done } : item,
+    )
+    let document = patchLabSession(get().document, session.id, {
+      acceptanceChecklist: nextList,
+    })
+    document = await persist(document)
+    set({ ...withDerived(document) })
+
+    const binding = session.loopBinding
+    if (!binding) return
+    const allRequiredDone = nextList
+      .filter((item) => item.required !== false)
+      .every((item) => item.done)
+    if (!allRequiredDone) return
+    // Mirror checks into Loop duty progress so HITL gate can clear.
+    try {
+      const loop = useLoopGraphStore.getState()
+      for (const item of nextList) {
+        if (item.required === false) continue
+        await loop.patchDutyProgress(binding.nodeId, item.id, item.done ? 'done' : 'pending')
+      }
+      if (allRequiredDone) {
+        await loop.resolveHitl([
+          { questionId: `lab_accept_${binding.nodeId}`, answer: 'continue' },
+        ])
+      }
+    } catch {
+      // Loop advance is best-effort from Lab Card.
     }
   },
 

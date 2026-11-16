@@ -122,18 +122,32 @@ export class FileSecretStore implements SecretStore {
     return this.readOnly;
   }
 
+  private readPayload(): SecretFilePayload | null {
+    if (!existsSync(this.filePath)) return null;
+    try {
+      return JSON.parse(readFileSync(this.filePath, "utf8")) as SecretFilePayload;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Whether the file holds `ref`, without decrypting. Decrypting reaches the Keychain, which runs
+   * synchronously on the Electron main thread and can block the whole app behind a system prompt,
+   * so presence checks (auth status, startup) must never trigger it.
+   */
+  private storedRef(ref: string): boolean {
+    const parsed = this.readPayload();
+    if (!parsed) return false;
+    return ref in (parsed.secrets ?? {}) || ref in (parsed.encrypted ?? {});
+  }
+
   private loadCache(): Record<string, string> {
     if (this.cache) {
       return this.cache;
     }
-    if (!existsSync(this.filePath)) {
-      this.cache = {};
-      return this.cache;
-    }
-    let parsed: SecretFilePayload;
-    try {
-      parsed = JSON.parse(readFileSync(this.filePath, "utf8")) as SecretFilePayload;
-    } catch {
+    const parsed = this.readPayload();
+    if (!parsed) {
       this.cache = {};
       return this.cache;
     }
@@ -199,6 +213,7 @@ export class FileSecretStore implements SecretStore {
   }
 
   async get(ref: string): Promise<string | undefined> {
+    if (!this.cache && !this.storedRef(ref)) return undefined;
     return this.loadCache()[ref];
   }
 
@@ -212,6 +227,7 @@ export class FileSecretStore implements SecretStore {
   }
 
   async has(ref: string): Promise<boolean> {
-    return ref in this.loadCache();
+    if (this.cache) return ref in this.cache;
+    return this.storedRef(ref);
   }
 }

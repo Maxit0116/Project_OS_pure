@@ -166,4 +166,27 @@ export interface LoopExecutionHooks {
     tombstones?: string[];
     undeleted?: string[];
   };
+  /** In-app Notification Center (+ optional system notify). Fire-and-forget. */
+  pushAppNotification?: (input: {
+    title: string;
+    body: string;
+    loopId?: string;
+    instanceId?: string;
+    nodeId?: string;
+  }) => void;
+  /**
+   * Open Product Lab with acceptance checklist for Loop Lab Action.
+   * Returns ok when the Lab session was opened; runtime then awaits HITL.
+   */
+  startLabVerification?: (input: {
+    loopId: string;
+    instanceId: string;
+    nodeId: string;
+    acceptance: Array<{
+      id: string;
+      text: string;
+      required: boolean;
+      sourceNodeId?: string;
+    }>;
+  }) => { ok: boolean; sessionId?: string; message?: string };
 }

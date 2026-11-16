@@ -104,6 +104,8 @@ import {
   mockListLoopRunHistory,
   mockPauseLoopInstance,
   mockResolveLoopHitl,
+  mockPatchLoopDutyProgress,
+  mockMutateLoopDutyChecklist,
   mockRestoreLoopInstanceFromCheckpoint,
   mockResumeLoopInstance,
   mockSendLoopAuthoringTurn,
@@ -698,6 +700,35 @@ export class MockProjectOSApiClient extends ProjectOSLocalApi {
   ): Promise<LoopGraphDocument> {
     return Promise.resolve(
       mockResolveLoopHitl(projectId, loopId, instanceId, answers),
+    );
+  }
+
+  override patchLoopDutyProgress(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      itemId: string;
+      status: import("../contracts/loop-graph.js").LoopDutyItemStatus;
+    },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockPatchLoopDutyProgress(projectId, loopId, instanceId, input),
+    );
+  }
+
+  override mutateLoopDutyChecklist(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      mutate: import("../contracts/loop-graph.js").LoopDutyChecklistMutateOp;
+    },
+  ): Promise<LoopGraphDocument> {
+    return Promise.resolve(
+      mockMutateLoopDutyChecklist(projectId, loopId, instanceId, input),
     );
   }
 

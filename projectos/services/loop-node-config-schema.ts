@@ -16,8 +16,13 @@ import type {
   IntentGraph,
   IntentGraphEdge,
   IntentGraphNode,
+  LoopDutyItem,
 } from "../contracts/loop-graph.js";
-import { IntentEdgeKindSchema } from "../contracts/loop-graph.js";
+import {
+  IntentEdgeKindSchema,
+  LoopDutyItemSchema,
+  dutyItemsFromPrompt,
+} from "../contracts/loop-graph.js";
 import { getConnectorVendor } from "./loop-connectors/catalog.js";
 
 export const LoopNodeScalarParamSchema = z.union([
@@ -38,7 +43,7 @@ export const LoopNodeTypedConfigSchema = z
     credentialRefId: z.string().trim().min(1).max(120).optional(),
     timeoutMs: z.number().int().positive().max(600_000).optional(),
     retryLimit: z.number().int().positive().max(20).optional(),
-    waitMs: z.number().int().nonnegative().max(3_600_000).optional(),
+    waitMs: z.number().int().nonnegative().max(604_800_000).optional(),
     humanAssignee: z.string().trim().min(1).max(120).optional(),
     humanAllowedActions: z
       .array(z.string().trim().min(1).max(80))
@@ -113,7 +118,14 @@ function allowedOperations(
   if (integration === "slack") return SLACK_OPS;
   if (integration === "feishu" || integration === "lark") return FEISHU_LARK_OPS;
   if (integration === "gmail") return GMAIL_OPS;
-  if (integration === "test" || integration === "terminal") return null;
+  if (
+    integration === "test" ||
+    integration === "terminal" ||
+    integration === "notify" ||
+    integration === "lab"
+  ) {
+    return null;
+  }
   return null;
 }
 
@@ -238,6 +250,23 @@ export function validateLoopNodeConfig(
         code: "required",
       });
     }
+    if (kind === "schedule") {
+      const mode = node.scheduleMode ?? "delay";
+      if (mode === "delay" && node.waitMs == null) {
+        issues.push({
+          path: "waitMs",
+          message: "Schedule delay mode requires waitMs",
+          code: "required",
+        });
+      }
+      if (mode === "at" && !node.scheduleAt?.trim()) {
+        issues.push({
+          path: "scheduleAt",
+          message: "Schedule absolute mode requires scheduleAt",
+          code: "required",
+        });
+      }
+    }
   }
 
   if (type === "human") {
@@ -324,11 +353,65 @@ export function applyIntentNodePatch(
   }
 
   const current = draft.nodes[index]!;
+
+  // Normalize dutyItems when the model returns a structured checklist.
+  let normalizedDutyItems: LoopDutyItem[] | undefined;
+  if (patch.dutyItems !== undefined) {
+    if (!Array.isArray(patch.dutyItems)) {
+      return {
+        ok: false,
+        issues: [
+          {
+            path: "dutyItems",
+            message: "dutyItems must be an array",
+            code: "type",
+          },
+        ],
+      };
+    }
+    const parsedItems: LoopDutyItem[] = [];
+    for (let i = 0; i < patch.dutyItems.length; i += 1) {
+      const parsed = LoopDutyItemSchema.safeParse(patch.dutyItems[i]);
+      if (!parsed.success) {
+        return {
+          ok: false,
+          issues: [
+            {
+              path: `dutyItems.${i}`,
+              message: "Invalid duty item",
+              code: "type",
+            },
+          ],
+        };
+      }
+      parsedItems.push(parsed.data);
+    }
+    normalizedDutyItems = parsedItems;
+  } else if (
+    typeof patch.prompt === "string" &&
+    patch.prompt.trim() &&
+    !current.dutyItems?.length
+  ) {
+    // Prompt-only assignment: derive an initial checklist so canvas body stays task-shaped.
+    const kind =
+      (patch.type ?? current.type) === "human" ||
+      Boolean(patch.humanMode ?? current.humanMode)
+        ? ("human" as const)
+        : ("machine" as const);
+    normalizedDutyItems = dutyItemsFromPrompt(patch.prompt, {
+      kind,
+      source: "authoring",
+    });
+  }
+
   const merged: IntentGraphNode = {
     ...current,
     ...patch,
     id: current.id,
     position: patch.position ?? current.position,
+    ...(normalizedDutyItems
+      ? { dutyItems: normalizedDutyItems, dutyEdited: true }
+      : {}),
   };
 
   // Drop undefined optional keys from patch (explicit clear uses null where schema allows).

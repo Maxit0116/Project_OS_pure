@@ -21,6 +21,8 @@ export interface StartLabSessionInput {
   scopeNodeIds?: string[];
   previewUrl?: string | null;
   capture?: Partial<LabCaptureConfig>;
+  acceptanceChecklist?: NonNullable<LabSession["acceptanceChecklist"]>;
+  loopBinding?: NonNullable<LabSession["loopBinding"]>;
 }
 
 export function startLabSession(
@@ -51,6 +53,10 @@ export function startLabSession(
     chatSessionId: null,
     activeFixRunId: null,
     startError: null,
+    ...(input.acceptanceChecklist
+      ? { acceptanceChecklist: input.acceptanceChecklist }
+      : {}),
+    ...(input.loopBinding ? { loopBinding: input.loopBinding } : {}),
     createdAt: nowIso,
     updatedAt: nowIso,
     endedAt: null,
@@ -84,6 +90,8 @@ export function patchLabSession(
       | "capabilityNeeds"
       | "capabilityProposals"
       | "chatSessionId"
+      | "acceptanceChecklist"
+      | "loopBinding"
     >
   >,
   nowIso = new Date().toISOString(),

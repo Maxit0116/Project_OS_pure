@@ -27,6 +27,9 @@ export function parseGithubOwnerRepo(
   return undefined;
 }
 
+/** Keep Graph / Locator soft-fetches snappy when api.github.com is unreachable. */
+const GITHUB_API_FETCH_TIMEOUT_MS = 3_000;
+
 async function githubApiFetch(
   path: string,
   accessToken: string,
@@ -38,7 +41,24 @@ async function githubApiFetch(
   headers.set("Authorization", `Bearer ${accessToken}`);
   headers.set("User-Agent", "ProjectOS");
   headers.set("X-GitHub-Api-Version", "2022-11-28");
-  return fetchImpl(`https://api.github.com${path}`, { ...init, headers });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), GITHUB_API_FETCH_TIMEOUT_MS);
+  // Honor a caller signal if present; otherwise use our connect/read budget.
+  const onAbort = () => controller.abort();
+  if (init.signal) {
+    if (init.signal.aborted) controller.abort();
+    else init.signal.addEventListener("abort", onAbort, { once: true });
+  }
+  try {
+    return await fetchImpl(`https://api.github.com${path}`, {
+      ...init,
+      headers,
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timer);
+    init.signal?.removeEventListener("abort", onAbort);
+  }
 }
 
 export async function listBranchesViaRest(

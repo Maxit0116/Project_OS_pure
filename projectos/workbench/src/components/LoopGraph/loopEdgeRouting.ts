@@ -1425,6 +1425,36 @@ export function routeProvidesCurve(input: {
 }
 
 /**
+ * Rubber-band preview while the user drags from a port to a free cursor.
+ * Keeps a short orthogonal path (few bends / short length) and never runs the
+ * full-graph perimeter detour used for committed edges.
+ */
+export function routeLoopEdgePreview(input: {
+  source: IntentGraphNode
+  endPoint: Point
+  sourcePort: IntentEdgePort
+  width?: number
+  height?: number
+  sourceAlong?: number
+  offset?: number
+  cornerRadius?: number
+}): RoutedEdge {
+  return routeLoopEdge({
+    source: input.source,
+    endPoint: input.endPoint,
+    sourcePort: input.sourcePort,
+    sourceAllowedPorts: [input.sourcePort],
+    // Preview must not snake around every node on the canvas.
+    obstacles: [],
+    width: input.width,
+    height: input.height,
+    sourceAlong: input.sourceAlong,
+    offset: input.offset,
+    cornerRadius: input.cornerRadius,
+  })
+}
+
+/**
  * Route an orthogonal edge (H/V segments + rounded corners) from a source port
  * to a target port — or a free-floating point while dragging a new edge.
  * Do not use for `provides` wiring — call {@link routeProvidesCurve} instead.
@@ -1468,6 +1498,8 @@ export function routeLoopEdge(input: {
   const targetAllowed = input.targetAllowedPorts ?? PORTS
   const sourceAlong = input.sourceAlong ?? 0.5
   const targetAlong = input.targetAlong ?? 0.5
+  // Free-cursor rubber-band: ignore foreign obstacles so the wire stays short.
+  const isFreeEndpointPreview = Boolean(input.endPoint) && !input.target
   const sizeOf =
     input.obstacleSize ??
     ((node: IntentGraphNode) => {
@@ -1478,7 +1510,9 @@ export function routeLoopEdge(input: {
       return { width, height }
     })
 
-  const obstacleRects: ObstacleRect[] = (input.obstacles ?? []).map((node) => {
+  const obstacleRects: ObstacleRect[] = (
+    isFreeEndpointPreview ? [] : (input.obstacles ?? [])
+  ).map((node) => {
     const size = sizeOf(node)
     return nodeRect(node, size.width, size.height, LOOP_EDGE_NODE_CLEARANCE)
   })

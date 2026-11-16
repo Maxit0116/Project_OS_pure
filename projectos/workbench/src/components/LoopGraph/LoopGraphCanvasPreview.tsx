@@ -17,6 +17,12 @@ import { LoopIntegrationIcon } from './integrations/LoopIntegrationIcon'
 import LoopDiamondAutosize from './LoopDiamondAutosize'
 import type { DiamondBox } from './loopDiamondGeometry'
 import { isDiamondLoopNode, visualForIntentNode } from './loopNodeVisuals'
+import LoopNodeDutyChecklist from './LoopNodeDutyChecklist'
+import {
+  isWiringListKind,
+  LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+  wiringListMembersOf,
+} from '../../../../services/loop-wiring-list'
 import {
   formatEdgeLabel,
   routeLoopEdge,
@@ -327,6 +333,8 @@ export default function LoopGraphCanvasPreview({
                 key={node.id}
                 className={`${styles.node} ${categoryClass} ${
                   configSatellite ? styles.nodeConfig : ''
+                } ${
+                  isWiringListKind(node.satelliteKind) ? styles.nodeConfigList : ''
                 } ${diamond ? styles.nodeDiamond : ''} ${
                   inWorkGroup ? styles.nodeWorkGroupMember : ''
                 } ${selected ? styles.nodeActive : ''}`}
@@ -335,7 +343,13 @@ export default function LoopGraphCanvasPreview({
                   top: node.position.y,
                   width: size.width,
                   minHeight: size.height,
-                  ...(diamond || inWorkGroup
+                  // Keep preview AABB locked so ports/edges match the card edge.
+                  ...(diamond ||
+                  inWorkGroup ||
+                  isWiringListKind(node.satelliteKind) ||
+                  (!configSatellite &&
+                    (node.type ?? 'agent') === 'agent' &&
+                    !inWorkGroup)
                     ? { height: size.height, minHeight: size.height }
                     : null),
                 }}
@@ -348,7 +362,42 @@ export default function LoopGraphCanvasPreview({
                   setSelectedNodeId(node.id)
                 }}
               >
-                {configSatellite ? (
+                {configSatellite && isWiringListKind(node.satelliteKind) ? (
+                  (() => {
+                    const listMembers = wiringListMembersOf(node)
+                    const visible = listMembers.slice(
+                      0,
+                      LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+                    )
+                    const hidden = Math.max(
+                      0,
+                      listMembers.length - LOOP_WIRING_LIST_CARD_MAX_VISIBLE_ROWS,
+                    )
+                    return (
+                      <div className={styles.nodeConfigListCard}>
+                        <div className={styles.nodeConfigListCardHeader}>
+                          <span
+                            className={`${styles.nodeIcon} ${categoryClass}`}
+                            aria-hidden
+                          >
+                            <NodeIcon size={12} strokeWidth={1.75} />
+                          </span>
+                          <span className={styles.nodeTitle}>
+                            {node.title || visual.shortLabel}
+                          </span>
+                        </div>
+                        <ul className={styles.nodeConfigListCardRows}>
+                          {visible.map((member) => (
+                            <li key={member.id} title={member.title}>
+                              {member.title.replace(/^(MCP|Skill)\s*·\s*/i, '')}
+                            </li>
+                          ))}
+                          {hidden > 0 ? <li>+{hidden}</li> : null}
+                        </ul>
+                      </div>
+                    )
+                  })()
+                ) : configSatellite ? (
                   <span className={`${styles.nodeIcon} ${categoryClass}`} aria-hidden>
                     <NodeIcon size={16} strokeWidth={1.75} />
                   </span>
@@ -377,18 +426,23 @@ export default function LoopGraphCanvasPreview({
                         ) : null}
                       </span>
                     </div>
-                    {node.prompt.trim() ? (
-                      <p className={styles.nodePrompt}>{node.prompt}</p>
-                    ) : null}
+                    <div className={styles.nodePrompt}>
+                      <LoopNodeDutyChecklist node={node} compact />
+                    </div>
                   </LoopDiamondAutosize>
                 ) : inWorkGroup ? (
-                  <div className={styles.nodeTop}>
-                    <span className={`${styles.nodeIcon} ${categoryClass}`} aria-hidden>
-                      <NodeIcon size={13} strokeWidth={1.75} />
-                    </span>
-                    <span className={styles.nodeTitle}>
-                      {node.title || visual.shortLabel}
-                    </span>
+                  <div className={styles.nodeWorkGroupMemberInner}>
+                    <div className={styles.nodeTop}>
+                      <span className={`${styles.nodeIcon} ${categoryClass}`} aria-hidden>
+                        <NodeIcon size={14} strokeWidth={1.75} />
+                      </span>
+                      <span className={styles.nodeTitle}>
+                        {node.title || visual.shortLabel}
+                      </span>
+                    </div>
+                    <div className={styles.nodePrompt}>
+                      <LoopNodeDutyChecklist node={node} compact />
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -411,9 +465,9 @@ export default function LoopGraphCanvasPreview({
                         ) : null}
                       </span>
                     </div>
-                    {node.prompt.trim() ? (
-                      <p className={styles.nodePrompt}>{node.prompt}</p>
-                    ) : null}
+                    <div className={styles.nodePrompt}>
+                      <LoopNodeDutyChecklist node={node} compact />
+                    </div>
                   </>
                 )}
               </div>

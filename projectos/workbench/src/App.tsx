@@ -3,6 +3,7 @@ import AppShell from './layout/AppShell'
 import WorkbenchErrorBoundary from './components/ui/WorkbenchErrorBoundary'
 import { useDesktopWindowFocus } from './hooks/useDesktopWindowFocus'
 import { useSessionSweepScheduler } from './hooks/useSessionSweepScheduler'
+import { installLoopWorkbenchBridges } from './lib/loopWorkbenchBridges'
 import { useWorkbenchStore } from './state/workbenchStore'
 import {
   applyThemeToDocument,
@@ -16,6 +17,10 @@ export default function App() {
 
   useDesktopWindowFocus()
   useSessionSweepScheduler()
+
+  useEffect(() => {
+    installLoopWorkbenchBridges()
+  }, [])
 
   useEffect(() => {
     const resolved = resolveTheme(themePreference)

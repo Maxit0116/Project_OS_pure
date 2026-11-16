@@ -84,6 +84,13 @@ export default function WorkbenchStageRail() {
       data-revealed={revealed ? 'true' : 'false'}
     >
       <div
+        className={styles.reach}
+        data-workbench-stage-rail-reach=""
+        aria-hidden
+        onPointerEnter={revealStage}
+        onPointerLeave={scheduleCollapse}
+      />
+      <div
         className={styles.float}
         onPointerEnter={revealStage}
         onPointerLeave={scheduleCollapse}
@@ -94,6 +101,7 @@ export default function WorkbenchStageRail() {
           scheduleCollapse()
         }}
       >
+        <span className={styles.peep} aria-hidden />
         <div
           className={styles.stack}
           role="toolbar"

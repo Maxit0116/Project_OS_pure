@@ -28,10 +28,20 @@ export const LOOP_SATELLITE_KINDS = [
   "memory",
   "skill",
   "mcp",
+  /** Collapsed MCP bag when an agent has more than LOOP_WIRING_LIST_THRESHOLD. */
+  "mcp_list",
   "rules",
   "pack",
+  /** Collapsed Skills bag when an agent has more than LOOP_WIRING_LIST_THRESHOLD. */
+  "skill_list",
 ] as const;
 export type LoopSatelliteKind = (typeof LOOP_SATELLITE_KINDS)[number];
+
+/**
+ * MCP / Skills satellites stay individual while count ≤ this.
+ * At threshold+1 they collapse into one `mcp_list` / `skill_list` node.
+ */
+export const LOOP_WIRING_LIST_THRESHOLD = 3;
 
 /**
  * Agent bottom config ports.
@@ -88,6 +98,10 @@ export const LOOP_ACTION_INTEGRATIONS = [
   "lark",
   "sentry",
   "gmail",
+  /** In-app Notification Center (+ system notify when unfocused). */
+  "notify",
+  /** Product Lab verification / acceptance orchestration. */
+  "lab",
   /** Batch2/3 catalog vendors — same Action schema; settle via connector path. */
   "linear",
   "jira_cloud",
@@ -105,8 +119,13 @@ export const LOOP_LOGIC_KINDS = [
   "exit",
   "retry",
   "wait",
+  /** Wall-clock schedule — arms createRun at fireAt (not graph-join wait). */
+  "schedule",
 ] as const;
 export type LoopLogicKind = (typeof LOOP_LOGIC_KINDS)[number];
+
+export const LOOP_SCHEDULE_MODES = ["delay", "at"] as const;
+export type LoopScheduleMode = (typeof LOOP_SCHEDULE_MODES)[number];
 
 /** Common GitHub operations exposed as Action shortcuts (same schema). */
 export const LOOP_GITHUB_OPERATIONS = [
@@ -287,8 +306,8 @@ export function configPortForSatelliteKind(
 ): LoopAgentConfigPort {
   if (kind === "model") return "model";
   if (kind === "memory") return "memory";
-  if (kind === "mcp") return "mcp";
-  if (kind === "skill") return "skill";
+  if (kind === "mcp" || kind === "mcp_list") return "mcp";
+  if (kind === "skill" || kind === "skill_list") return "skill";
   // rules / pack still fold through the legacy shared capability port
   return "capability";
 }
@@ -299,8 +318,8 @@ export function effectiveConfigPort(
   satelliteKind: LoopSatelliteKind | undefined,
 ): LoopAgentConfigPort | undefined {
   if (port && port !== "capability") return port;
-  if (satelliteKind === "mcp") return "mcp";
-  if (satelliteKind === "skill") return "skill";
+  if (satelliteKind === "mcp" || satelliteKind === "mcp_list") return "mcp";
+  if (satelliteKind === "skill" || satelliteKind === "skill_list") return "skill";
   if (satelliteKind === "model") return "model";
   if (satelliteKind === "memory") return "memory";
   return port ?? (satelliteKind ? configPortForSatelliteKind(satelliteKind) : undefined);

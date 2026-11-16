@@ -2014,6 +2014,43 @@ export class IpcTransport implements ApiTransport {
     return this.invoke("resolveLoopHitl", projectId, loopId, instanceId, answers);
   }
 
+  patchLoopDutyProgress(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      itemId: string;
+      status: import("../../contracts/loop-graph.js").LoopDutyItemStatus;
+    },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke(
+      "patchLoopDutyProgress",
+      projectId,
+      loopId,
+      instanceId,
+      input,
+    );
+  }
+
+  mutateLoopDutyChecklist(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      mutate: import("../../contracts/loop-graph.js").LoopDutyChecklistMutateOp;
+    },
+  ): Promise<import("../../contracts/loop-graph.js").LoopGraphDocument> {
+    return this.invoke(
+      "mutateLoopDutyChecklist",
+      projectId,
+      loopId,
+      instanceId,
+      input,
+    );
+  }
+
   getLoopInstanceEvents(
     projectId: string,
     loopId: string,

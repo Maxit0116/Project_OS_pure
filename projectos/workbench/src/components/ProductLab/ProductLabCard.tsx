@@ -33,6 +33,7 @@ export default function ProductLabCard() {
   const handoffFinding = useProductLabStore((s) => s.handoffFinding)
   const markVerified = useProductLabStore((s) => s.markVerified)
   const showFindingOnMap = useProductLabStore((s) => s.showFindingOnMap)
+  const toggleAcceptanceItem = useProductLabStore((s) => s.toggleAcceptanceItem)
   const { ts } = useI18n()
 
   const session = useMemo(() => getActiveLabSession(document), [document])
@@ -49,6 +50,7 @@ export default function ProductLabCard() {
   const pendingProposals = proposals.filter(
     (p) => p.status === 'proposed' || p.status === 'installing' || p.status === 'failed',
   )
+  const acceptance = session.acceptanceChecklist ?? []
 
   return (
     <aside
@@ -65,6 +67,36 @@ export default function ProductLabCard() {
           {ts(`productLab.cardPhase.${phase}` as 'productLab.cardPhase.experiencing')}
         </span>
       </div>
+
+      {acceptance.length > 0 ? (
+        <div className={styles.section} data-testid="product-lab-acceptance">
+          <h4 className={styles.sectionTitle}>
+            {ts('productLab.card.acceptanceTitle')}
+          </h4>
+          <p className={styles.muted}>{ts('productLab.card.acceptanceHint')}</p>
+          <ul className={styles.needList}>
+            {acceptance.map((item) => (
+              <li key={item.id}>
+                <label className={styles.acceptanceRow}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(item.done)}
+                    onChange={(event) =>
+                      void toggleAcceptanceItem(item.id, event.target.checked)
+                    }
+                  />
+                  <span>
+                    {item.text}
+                    {item.required === false ? null : (
+                      <span className={styles.muted}> *</span>
+                    )}
+                  </span>
+                </label>
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
 
       <p className={refinementStyles.explanation}>
         {phase === 'bootstrapping'

@@ -65,7 +65,7 @@ describe("compileIntentGraphHeuristic · work groups", () => {
           target: "wg1",
           kind: "depends",
           prompt: "Hand off to squad",
-          workGroupPort: "in",
+          workGroupPort: "w",
         },
         {
           id: "e_out",
@@ -73,7 +73,7 @@ describe("compileIntentGraphHeuristic · work groups", () => {
           target: "down",
           kind: "depends",
           prompt: "Squad delivers",
-          workGroupPort: "out",
+          workGroupPort: "e",
         },
       ],
     };

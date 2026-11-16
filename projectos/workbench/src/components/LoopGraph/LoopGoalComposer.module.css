@@ -15,6 +15,60 @@
   z-index: 12;
 }
 
+.promptPullHandle {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  margin: 0;
+  padding: 6px 12px;
+  border: none;
+  border-bottom: 1px solid transparent;
+  background: color-mix(in srgb, var(--tech-bg-elevated) 70%, var(--tech-bg-side-panel));
+  color: var(--tech-text-muted);
+  font: inherit;
+  font-size: var(--font-size-xs);
+  font-weight: 500;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition:
+    color 150ms var(--ease-out, ease-out),
+    background 150ms var(--ease-out, ease-out),
+    border-color 150ms var(--ease-out, ease-out);
+}
+
+.promptPullHandle:hover {
+  color: var(--tech-text-primary);
+  background: var(--tech-bg-elevated);
+  border-bottom-color: var(--tech-border);
+}
+
+.promptPullHandle:focus-visible {
+  outline: none;
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.promptPullGrip {
+  width: 28px;
+  height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--tech-border-strong) 70%, transparent);
+  flex-shrink: 0;
+}
+
+.promptPullLabel {
+  min-width: 0;
+  max-width: min(320px, 50%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composerPromptExpanded .promptPullHandle {
+  border-bottom-color: var(--tech-border);
+}
+
 .bookmarkStack {
   position: relative;
   display: flex;
@@ -332,6 +386,10 @@
   padding: 10px 12px 12px;
   flex: 1;
   min-height: 140px;
+}
+
+.promptDock[hidden] {
+  display: none;
 }
 
 .focusChipLabel {

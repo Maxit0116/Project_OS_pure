@@ -14,28 +14,47 @@ import type {
   LoopGraphDocument,
   LoopGraphHead,
   LoopGraphPreset,
+  LoopDutyChecklistMutateOp,
+  LoopDutyItemStatus,
   LoopHitlAnswer,
+  LoopLayerColorKey,
   LoopPaletteItem,
   LoopSatelliteKind,
   LoopSpec,
   LoopTaskMaterial,
+  LoopWiringListMember,
   LoopWorkGroup,
   LoopWorkGroupCollaborationMode,
   LoopWorkGroupPort,
+  LoopWorkGroupStaffingProposal,
 } from '@contracts/index'
 import {
   computeLoopWorkGroupFrameBounds,
   configPortForSatelliteKind,
   createLoopWorkGroupId,
+  createLoopLayerId,
+  createLoopWorkGroupStaffingProposalId,
   createNodeFromPaletteItem,
+  dutyItemsFromPrompt,
   defaultEmptyLoopWorkGroupFrame,
+  LOOP_LAYER_LIMIT,
+  LOOP_WORK_GROUP_SUPERVISOR_LISTING_ID,
+  LOOP_WORK_GROUP_SUPERVISOR_PALETTE_ID,
+  nextLoopLayerColorKey,
+  nextLoopLayerTitle,
+  pruneLoopLayerMembers,
   estimateWorkGroupMemberChipSize,
   getIntentGraphCompileIssues,
+  getLoopDepartmentTemplate,
   getLoopGraphPreset,
   getLoopPaletteItem,
+  hasDutyAssignment,
+  isLoopDepartmentPaletteItem,
+  loopPaletteAgentListingId,
   isConfigNode,
   isIntentGraphReadyForCompile,
   isNestedWorkGroupInteriorNode,
+  isLoopDepartmentWorkGroup,
   isWorkGroupEndpoint,
   isWorkGroupInteriorNode,
   isWorkGroupSurfaceAgent,
@@ -44,8 +63,11 @@ import {
   LOOP_WORK_GROUP_LIMITS,
   LOOP_WORK_GROUP_PADDING,
   LOOP_WORK_GROUP_TITLE_BAR_HEIGHT,
-  nextLoopWorkGroupTitle,
+  mergeSupervisorDuties,
+  applyLoopWorkGroupTaskTitle,
+  LOOP_WORK_GROUP_UNTITLED_TASK,
   suggestIntentEdgeKind,
+  suggestSpecialistPaletteFromNeed,
   withArchitectureDefaults,
 } from '@contracts/index'
 import {
@@ -55,6 +77,17 @@ import {
   resolveAgentWiring,
   type AgentWiringBase,
 } from '../../../services/loop-agent-wiring'
+import {
+  appendWiringListMember,
+  normalizeWiringLists,
+  removeWiringListMember,
+  type WiringListMemberKind,
+} from '../../../services/loop-wiring-list'
+import {
+  decisionBranchKeyForPort,
+  decisionBranchKindForNode,
+  isDecisionBranchSourceNode,
+} from '../components/LoopGraph/loopDecisionBranch'
 import {
   nodeBoxSize,
   satelliteFollowAgentPatches,
@@ -199,8 +232,22 @@ interface LoopGraphStore {
   authoringFocus: LoopAuthoringFocus | null
   /** Bumped when beginFocusedEdit wants the composer textarea focused. */
   composerFocusNonce: number
+  /**
+   * Whether the goal prompt dock is pulled out. Collapsed by default so the
+   * canvas uses more vertical space; expands on focus / user pull.
+   */
+  composerPromptOpen: boolean
+  setComposerPromptOpen: (open: boolean) => void
   /** Selected Agent Work Group frame on the Draw canvas. */
   selectedWorkGroupId: string | null
+  /**
+   * When set, the matching L1 frame should open task-title editing
+   * (used right after placing a work group / department).
+   */
+  pendingWorkGroupTaskEditId: string | null
+  requestWorkGroupTaskEdit: (workGroupId: string | null) => void
+  /** Selected visual stage layer (frontend-only). */
+  selectedLayerId: string | null
   /**
    * When set, the Draw canvas drills into that work group's secondary (L2) graph:
    * Agents + interior Action/Logic/Human collaboration nodes.
@@ -231,17 +278,66 @@ interface LoopGraphStore {
   beginFocusedEdit: (focus: LoopAuthoringFocus) => Promise<void>
   clearAuthoringFocus: () => void
   setSelectedWorkGroupId: (workGroupId: string | null) => void
+  setSelectedLayerId: (layerId: string | null) => void
+  /** Create a visual stage layer from member node ids (no layout change). */
+  createLayerFromMembers: (memberNodeIds: string[]) => string | null
+  renameLayer: (layerId: string, title: string) => void
+  setLayerColor: (layerId: string, colorKey: LoopLayerColorKey) => void
+  setLayerMembers: (layerId: string, memberNodeIds: string[]) => void
+  dissolveLayer: (layerId: string) => void
   setAuthoringEngine: (engine: LoopAuthoringEngine) => void
-  /** Create an empty dashed work-group frame at canvas origin. */
+  /** Create an empty dashed work-group frame at canvas origin (no members). */
   createWorkGroupAt: (position: { x: number; y: number }) => string | null
-  renameWorkGroup: (id: string, title: string) => void
+  /**
+   * Empty work group + seeded Supervisor (coordinator). Used by palette
+   * `workgroup.create`.
+   */
+  createWorkGroupWithSupervisorAt: (position: {
+    x: number
+    y: number
+  }) => Promise<string | null>
+  /** Ensure the coordinator node carries Supervisor staffing duties. */
+  applySupervisorDutiesToNode: (nodeId: string) => void
+  /**
+   * Set the squad's task name. Persists `taskTitle` and recomputes display
+   * `title` (department · task when applicable).
+   */
+  renameWorkGroup: (id: string, taskTitle: string) => void
   updateWorkGroup: (
     id: string,
     patch: {
       collaborationMode?: LoopWorkGroupCollaborationMode
       coordinatorNodeId?: string | null
       title?: string
+      taskTitle?: string | null
+      departmentTemplateId?: string | null
     },
+  ) => void
+  /** After place/create: frame should open task-title editing. */
+  pendingWorkGroupTaskEditId: string | null
+  requestWorkGroupTaskEdit: (workGroupId: string | null) => void
+  /**
+   * Supervisor proposes admitting a specialist (pending until confirm).
+   * Returns the proposal id, or null on failure.
+   */
+  proposeWorkGroupStaffing: (
+    workGroupId: string,
+    input: {
+      reason: string
+      suggestedPaletteItemId?: string
+      suggestedAgentDefinitionId?: string
+      suggestedTitle?: string
+      requestedByNodeId?: string
+    },
+  ) => string | null
+  /** Place the suggested specialist and join the work group. */
+  confirmWorkGroupStaffingProposal: (
+    workGroupId: string,
+    proposalId: string,
+  ) => Promise<string | null>
+  dismissWorkGroupStaffingProposal: (
+    workGroupId: string,
+    proposalId: string,
   ) => void
   /** Join a specialist agent; returns false and sets error when rejected. */
   addNodeToWorkGroup: (workGroupId: string, nodeId: string) => boolean
@@ -286,6 +382,14 @@ interface LoopGraphStore {
       agentRole?: import('@contracts/index').LoopAgentRole
       wiringBase?: AgentWiringBase | null
     }>,
+    position: { x: number; y: number },
+  ) => Promise<string | null>
+  /**
+   * Built-in department: place curated specialist agents and wrap them in a
+   * titled work group. Returns the new workGroupId, or null on failure.
+   */
+  placeDepartmentWorkGroup: (
+    departmentPaletteId: string,
     position: { x: number; y: number },
   ) => Promise<string | null>
   /** Open a sheet, or collapse it if already open (bookmark toggle). */
@@ -343,6 +447,18 @@ interface LoopGraphStore {
     nodeId: string,
     patch: { title?: string; configRef?: LoopConfigRef },
   ) => void
+  /**
+   * Collapse MCP/Skills past the threshold into list satellites (and expand
+   * back when ≤ threshold). Used on open + after wiring mutations.
+   */
+  normalizeWiringListsNow: () => boolean
+  /** Append a member into an mcp_list / skill_list, then normalize. */
+  appendWiringListMember: (
+    listNodeId: string,
+    member: LoopWiringListMember,
+  ) => boolean
+  /** Remove a member from a wiring list, then normalize (empty → delete). */
+  removeWiringListMember: (listNodeId: string, memberId: string) => boolean
   /** Write current canvas wiring into the bound Workforce Agent definition (confirm first in UI). */
   applyWiringToAgentDefinition: (agentNodeId: string) => Promise<boolean>
   /** Create a new Workforce Agent from current canvas wiring and bind this node. */
@@ -401,6 +517,8 @@ interface LoopGraphStore {
   acknowledgeMaterialRereview: () => void
   runPreflight: () => Promise<void>
   startRun: () => Promise<void>
+  /** Poll armed schedules and createRun when due. */
+  fireDueSchedules: () => Promise<void>
   /** Product entry: switch to Run with saved-flow taskPack materials restored. */
   openSavedFlowForRun: () => void
   /** PW-7: add Issue/PR/code/error context material from a real product entry. */
@@ -415,6 +533,15 @@ interface LoopGraphStore {
   resumeRun: () => Promise<void>
   advanceRun: () => Promise<void>
   resolveHitl: (answers: LoopHitlAnswer[]) => Promise<void>
+  patchDutyProgress: (
+    nodeId: string,
+    itemId: string,
+    status: LoopDutyItemStatus,
+  ) => Promise<void>
+  mutateDutyChecklist: (
+    nodeId: string,
+    mutate: LoopDutyChecklistMutateOp,
+  ) => Promise<void>
   restoreFromCheckpoint: (instanceId: string) => Promise<void>
   deriveDraftFromRun: (instanceId: string) => Promise<void>
   refreshRunHistory: () => Promise<void>
@@ -447,11 +574,21 @@ function patchDraftDocument(
   }
 }
 
-async function ensureAuthoringSession(): Promise<string | null> {
+/**
+ * Bind a silent authoring chat session to a new node/edge.
+ * Does not open the AI Chat sidebar — canvas create (palette drag / right-click)
+ * should leave the chat panel alone. Pass `openPanel: true` only for explicit
+ * "refine in chat" entry points.
+ */
+async function ensureAuthoringSession(options?: {
+  openPanel?: boolean
+}): Promise<string | null> {
   const sessionId = await useChatSessionStore
     .getState()
     .createSession({ seedWelcome: false, chatMode: 'ask' })
-  useWorkbenchStore.getState().setRightPanelOpen(true)
+  if (options?.openPanel) {
+    useWorkbenchStore.getState().setRightPanelOpen(true)
+  }
   return sessionId || null
 }
 
@@ -518,7 +655,13 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
   canvasSelectedEdgeId: null,
   authoringFocus: null,
   composerFocusNonce: 0,
+  composerPromptOpen: false,
+  setComposerPromptOpen: (open) => set({ composerPromptOpen: open }),
   selectedWorkGroupId: null,
+  pendingWorkGroupTaskEditId: null,
+  requestWorkGroupTaskEdit: (workGroupId) =>
+    set({ pendingWorkGroupTaskEditId: workGroupId }),
+  selectedLayerId: null,
   focusedWorkGroupId: null,
   runHistory: [],
 
@@ -549,7 +692,10 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       canvasSelectedEdgeId: null,
       authoringFocus: null,
       composerFocusNonce: 0,
+      composerPromptOpen: false,
       selectedWorkGroupId: null,
+      pendingWorkGroupTaskEditId: null,
+      selectedLayerId: null,
       focusedWorkGroupId: null,
       runMaterials: [],
       runBranch: '',
@@ -612,6 +758,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         canvasSelectedEdgeId: null,
         selectedWorkGroupId: null,
         composerFocusNonce: get().composerFocusNonce + 1,
+        composerPromptOpen: true,
         error: null,
       })
     } else {
@@ -622,6 +769,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         canvasSelectedEdgeId: focus.id,
         selectedWorkGroupId: null,
         composerFocusNonce: get().composerFocusNonce + 1,
+        composerPromptOpen: true,
         error: null,
       })
     }
@@ -634,7 +782,128 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       authoringFocus: null,
       canvasSelectedEdgeId: null,
     }),
-  setSelectedWorkGroupId: (workGroupId) => set({ selectedWorkGroupId: workGroupId }),
+  setSelectedWorkGroupId: (workGroupId) =>
+    set({
+      selectedWorkGroupId: workGroupId,
+      ...(workGroupId ? {} : { pendingWorkGroupTaskEditId: null }),
+    }),
+  setSelectedLayerId: (layerId) => set({ selectedLayerId: layerId }),
+
+  createLayerFromMembers: (memberNodeIds) => {
+    const current = get().document
+    if (!current) return null
+    if (get().phase !== 'draw') {
+      set({ error: 'Layers can only be created while the loop is in draft' })
+      return null
+    }
+    const unique = [...new Set(memberNodeIds)].filter((id) =>
+      current.draft.nodes.some(
+        (node) => node.id === id && !isConfigNode(node),
+      ),
+    )
+    if (unique.length === 0) {
+      set({ error: 'Select at least one node to create a stage layer' })
+      return null
+    }
+    const existing = current.draft.layers ?? []
+    if (existing.length >= LOOP_LAYER_LIMIT) {
+      set({ error: `At most ${LOOP_LAYER_LIMIT} stage layers` })
+      return null
+    }
+    const seq = (current.draft.layerSeq ?? 0) + 1
+    const id = createLoopLayerId()
+    const layer = {
+      id,
+      title: nextLoopLayerTitle(seq),
+      colorKey: nextLoopLayerColorKey(existing),
+      memberNodeIds: unique,
+      createdAt: new Date().toISOString(),
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      layers: [...existing, layer],
+      layerSeq: seq,
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      selectedLayerId: id,
+      selectedWorkGroupId: null,
+      error: null,
+    })
+    get().schedulePersist()
+    return id
+  },
+
+  renameLayer: (layerId, title) => {
+    const current = get().document
+    if (!current) return
+    const nextTitle = title.trim().slice(0, 120)
+    if (!nextTitle) return
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      layers: (current.draft.layers ?? []).map((layer) =>
+        layer.id === layerId ? { ...layer, title: nextTitle } : layer,
+      ),
+    }
+    set({ document: patchDraftDocument(current, draft), error: null })
+    get().schedulePersist()
+  },
+
+  setLayerColor: (layerId, colorKey) => {
+    const current = get().document
+    if (!current) return
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      layers: (current.draft.layers ?? []).map((layer) =>
+        layer.id === layerId ? { ...layer, colorKey } : layer,
+      ),
+    }
+    set({ document: patchDraftDocument(current, draft), error: null })
+    get().schedulePersist()
+  },
+
+  setLayerMembers: (layerId, memberNodeIds) => {
+    const current = get().document
+    if (!current) return
+    const unique = [...new Set(memberNodeIds)].filter((id) =>
+      current.draft.nodes.some(
+        (node) => node.id === id && !isConfigNode(node),
+      ),
+    )
+    if (unique.length === 0) {
+      set({ error: 'A stage layer needs at least one node' })
+      return
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      layers: (current.draft.layers ?? []).map((layer) =>
+        layer.id === layerId ? { ...layer, memberNodeIds: unique } : layer,
+      ),
+    }
+    set({ document: patchDraftDocument(current, draft), error: null })
+    get().schedulePersist()
+  },
+
+  dissolveLayer: (layerId) => {
+    const current = get().document
+    if (!current) return
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      layers: (current.draft.layers ?? []).filter((layer) => layer.id !== layerId),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      selectedLayerId:
+        get().selectedLayerId === layerId ? null : get().selectedLayerId,
+      error: null,
+    })
+    get().schedulePersist()
+  },
   setAuthoringEngine: (engine) => set({ authoringEngine: engine }),
 
   createWorkGroupAt: (position) => {
@@ -655,7 +924,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     const now = new Date().toISOString()
     const group: LoopWorkGroup = {
       id: createLoopWorkGroupId(),
-      title: nextLoopWorkGroupTitle(seq),
+      title: LOOP_WORK_GROUP_UNTITLED_TASK,
       memberNodeIds: [],
       collaborationMode: 'coordinator',
       origin: { x: position.x, y: position.y },
@@ -671,6 +940,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     set({
       document: patchDraftDocument(current, draft),
       selectedWorkGroupId: group.id,
+      pendingWorkGroupTaskEditId: group.id,
+      selectedLayerId: null,
       canvasSelectedNodeId: null,
       error: null,
     })
@@ -678,8 +949,314 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     return group.id
   },
 
-  renameWorkGroup: (id, title) => {
-    get().updateWorkGroup(id, { title })
+  createWorkGroupWithSupervisorAt: async (position) => {
+    const workGroupId = get().createWorkGroupAt(position)
+    if (!workGroupId) return null
+    // Bind builtin definition up front — Supervisor is not a marketplace listing,
+    // so skipping catalog install avoids a failed join (no agentDefinitionId).
+    const nodeId = await get().beginAuthorNodeFromPalette(
+      LOOP_WORK_GROUP_SUPERVISOR_PALETTE_ID,
+      {
+        x: position.x + 24,
+        y: position.y + 40,
+      },
+      {
+        agentDefinitionId: `builtin:${LOOP_WORK_GROUP_SUPERVISOR_LISTING_ID}`,
+        title: 'Supervisor',
+        agentRole: 'planner',
+      },
+    )
+    if (!nodeId) {
+      get().dissolveWorkGroup(workGroupId)
+      set({ error: 'Could not place Work Group Supervisor' })
+      return null
+    }
+    get().applySupervisorDutiesToNode(nodeId)
+    if (!get().addNodeToWorkGroup(workGroupId, nodeId)) {
+      get().dissolveWorkGroup(workGroupId)
+      set({ error: 'Could not add Supervisor to the work group' })
+      return null
+    }
+    get().updateWorkGroup(workGroupId, {
+      coordinatorNodeId: nodeId,
+      collaborationMode: 'coordinator',
+    })
+    get().reflowWorkGroupSurfaceLayout(workGroupId)
+    get().setSelectedWorkGroupId(workGroupId)
+    return workGroupId
+  },
+
+  applySupervisorDutiesToNode: (nodeId) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') return
+    const node = current.draft.nodes.find((item) => item.id === nodeId)
+    if (!node || node.type !== 'agent') return
+    const dutyItems = mergeSupervisorDuties(node.dutyItems)
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      nodes: current.draft.nodes.map((item) =>
+        item.id === nodeId
+          ? {
+              ...item,
+              dutyItems,
+              dutyEdited: true,
+              agentRole: item.agentRole ?? 'planner',
+            }
+          : item,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  proposeWorkGroupStaffing: (workGroupId, input) => {
+    const current = get().document
+    if (!current) return null
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return null
+    }
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
+    )
+    if (!group) {
+      set({ error: 'Work group not found' })
+      return null
+    }
+    const reason = input.reason.trim()
+    if (!reason) {
+      set({ error: 'Staffing proposal needs a reason' })
+      return null
+    }
+    const suggestedPaletteItemId =
+      input.suggestedPaletteItemId ??
+      suggestSpecialistPaletteFromNeed(reason)
+    if (
+      !suggestedPaletteItemId &&
+      !input.suggestedAgentDefinitionId
+    ) {
+      set({
+        error:
+          'Could not suggest a specialist — pick a curated agent or bind a definition',
+      })
+      return null
+    }
+    if (
+      group.memberNodeIds.length >= LOOP_WORK_GROUP_LIMITS.membersPerGroup
+    ) {
+      set({
+        error: `Work group "${group.title}" is at the member limit`,
+      })
+      return null
+    }
+    const pendingCount = (group.staffingProposals ?? []).filter(
+      (item) => item.status === 'pending',
+    ).length
+    if (pendingCount >= 8) {
+      set({ error: 'Too many pending staffing proposals' })
+      return null
+    }
+    const now = new Date().toISOString()
+    const proposal: LoopWorkGroupStaffingProposal = {
+      id: createLoopWorkGroupStaffingProposalId(),
+      status: 'pending',
+      reason: reason.slice(0, 500),
+      ...(suggestedPaletteItemId
+        ? { suggestedPaletteItemId }
+        : {}),
+      ...(input.suggestedAgentDefinitionId
+        ? { suggestedAgentDefinitionId: input.suggestedAgentDefinitionId }
+        : {}),
+      ...(input.suggestedTitle
+        ? { suggestedTitle: input.suggestedTitle.slice(0, 120) }
+        : suggestedPaletteItemId
+          ? {
+              suggestedTitle:
+                getLoopPaletteItem(suggestedPaletteItemId)?.title ??
+                undefined,
+            }
+          : {}),
+      ...(input.requestedByNodeId
+        ? { requestedByNodeId: input.requestedByNodeId }
+        : group.coordinatorNodeId
+          ? { requestedByNodeId: group.coordinatorNodeId }
+          : {}),
+      createdAt: now,
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      workGroups: (current.draft.workGroups ?? []).map((item) =>
+        item.id === workGroupId
+          ? {
+              ...item,
+              staffingProposals: [
+                ...(item.staffingProposals ?? []),
+                proposal,
+              ],
+              updatedAt: now,
+            }
+          : item,
+      ),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+    return proposal.id
+  },
+
+  confirmWorkGroupStaffingProposal: async (workGroupId, proposalId) => {
+    const current = get().document
+    if (!current) return null
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return null
+    }
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
+    )
+    const proposal = group?.staffingProposals?.find(
+      (item) => item.id === proposalId,
+    )
+    if (!group || !proposal || proposal.status !== 'pending') {
+      set({ error: 'Staffing proposal not found or already resolved' })
+      return null
+    }
+    const origin = group.origin ?? { x: 80, y: 80 }
+    const memberPitch = 28 + 10
+    const index = group.memberNodeIds.length
+    const position = {
+      x: origin.x + 24,
+      y: origin.y + 40 + index * memberPitch,
+    }
+    let nodeId: string | null = null
+    if (proposal.suggestedPaletteItemId) {
+      nodeId = await get().beginAuthorNodeFromPalette(
+        proposal.suggestedPaletteItemId,
+        position,
+        proposal.suggestedTitle
+          ? { title: proposal.suggestedTitle }
+          : undefined,
+      )
+      const placed = get().document?.draft.nodes.find((n) => n.id === nodeId)
+      if (placed && !placed.agentDefinitionId) {
+        const listingId = loopPaletteAgentListingId(
+          proposal.suggestedPaletteItemId,
+        )
+        get().setNodeAgentDefinition(
+          nodeId!,
+          `builtin:${listingId ?? proposal.suggestedPaletteItemId}`,
+          {
+            title:
+              proposal.suggestedTitle ??
+              getLoopPaletteItem(proposal.suggestedPaletteItemId)?.title,
+          },
+        )
+      }
+    } else if (proposal.suggestedAgentDefinitionId) {
+      nodeId = await get().beginAuthorNodeFromPalette(
+        'agent.specialist',
+        position,
+        {
+          agentDefinitionId: proposal.suggestedAgentDefinitionId,
+          title: proposal.suggestedTitle ?? 'Specialist',
+        },
+      )
+    }
+    if (!nodeId) {
+      set({ error: 'Could not place the proposed specialist' })
+      return null
+    }
+    if (!get().addNodeToWorkGroup(workGroupId, nodeId)) {
+      return null
+    }
+    const now = new Date().toISOString()
+    const after = get().document
+    if (!after) return nodeId
+    const draft: IntentGraph = {
+      ...after.draft,
+      revision: after.draft.revision + 1,
+      workGroups: (after.draft.workGroups ?? []).map((item) => {
+        if (item.id !== workGroupId) return item
+        return {
+          ...item,
+          staffingProposals: (item.staffingProposals ?? []).map((entry) =>
+            entry.id === proposalId
+              ? {
+                  ...entry,
+                  status: 'accepted' as const,
+                  resolvedAt: now,
+                  admittedNodeId: nodeId!,
+                }
+              : entry,
+          ),
+          updatedAt: now,
+        }
+      }),
+    }
+    set({
+      document: patchDraftDocument(after, draft),
+      error: null,
+    })
+    get().schedulePersist()
+    get().reflowWorkGroupSurfaceLayout(workGroupId)
+    return nodeId
+  },
+
+  dismissWorkGroupStaffingProposal: (workGroupId, proposalId) => {
+    const current = get().document
+    if (!current) return
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return
+    }
+    const now = new Date().toISOString()
+    const workGroups = current.draft.workGroups ?? []
+    if (
+      !workGroups.some((group) =>
+        group.staffingProposals?.some(
+          (item) => item.id === proposalId && item.status === 'pending',
+        ),
+      )
+    ) {
+      return
+    }
+    const draft: IntentGraph = {
+      ...current.draft,
+      revision: current.draft.revision + 1,
+      workGroups: workGroups.map((item) => {
+        if (item.id !== workGroupId) return item
+        return {
+          ...item,
+          staffingProposals: (item.staffingProposals ?? []).map((entry) =>
+            entry.id === proposalId && entry.status === 'pending'
+              ? {
+                  ...entry,
+                  status: 'dismissed' as const,
+                  resolvedAt: now,
+                }
+              : entry,
+          ),
+          updatedAt: now,
+        }
+      }),
+    }
+    set({
+      document: patchDraftDocument(current, draft),
+      error: null,
+    })
+    get().schedulePersist()
+  },
+
+  renameWorkGroup: (id, taskTitle) => {
+    get().updateWorkGroup(id, { taskTitle })
   },
 
   updateWorkGroup: (id, patch) => {
@@ -698,19 +1275,56 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       revision: current.draft.revision + 1,
       workGroups: workGroups.map((group) => {
         if (group.id !== id) return group
-        return {
+        const departmentTemplateId =
+          patch.departmentTemplateId !== undefined
+            ? patch.departmentTemplateId || undefined
+            : group.departmentTemplateId
+        const departmentName = departmentTemplateId
+          ? getLoopDepartmentTemplate(departmentTemplateId)?.title
+          : undefined
+        const taskPatch =
+          patch.taskTitle !== undefined
+            ? applyLoopWorkGroupTaskTitle(
+                { departmentTemplateId },
+                patch.taskTitle,
+                departmentName,
+              )
+            : patch.departmentTemplateId !== undefined && !nextTitle
+              ? applyLoopWorkGroupTaskTitle(
+                  { departmentTemplateId },
+                  group.taskTitle,
+                  departmentName,
+                )
+              : null
+        const nextGroup: LoopWorkGroup = {
           ...group,
-          ...(nextTitle ? { title: nextTitle.slice(0, 120) } : {}),
-          ...(patch.collaborationMode
-            ? { collaborationMode: patch.collaborationMode }
-            : {}),
-          ...(patch.coordinatorNodeId !== undefined
-            ? {
-                coordinatorNodeId: patch.coordinatorNodeId || undefined,
-              }
-            : {}),
           updatedAt: now,
         }
+        if (patch.collaborationMode) {
+          nextGroup.collaborationMode = patch.collaborationMode
+        }
+        if (patch.coordinatorNodeId !== undefined) {
+          if (patch.coordinatorNodeId) {
+            nextGroup.coordinatorNodeId = patch.coordinatorNodeId
+          } else {
+            delete nextGroup.coordinatorNodeId
+          }
+        }
+        if (patch.departmentTemplateId !== undefined) {
+          if (patch.departmentTemplateId) {
+            nextGroup.departmentTemplateId = patch.departmentTemplateId
+          } else {
+            delete nextGroup.departmentTemplateId
+          }
+        }
+        if (taskPatch) {
+          nextGroup.title = taskPatch.title
+          if (taskPatch.taskTitle) nextGroup.taskTitle = taskPatch.taskTitle
+          else delete nextGroup.taskTitle
+        } else if (nextTitle) {
+          nextGroup.title = nextTitle.slice(0, 120)
+        }
+        return nextGroup
       }),
     }
     set({
@@ -880,10 +1494,23 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       .filter((node): node is IntentGraphNode => Boolean(node))
     if (surfaceNodes.length === 0) return
 
-    const members = surfaceNodes.map((node) => ({
-      id: node.id,
-      ...estimateWorkGroupMemberChipSize(node.title || 'Agent'),
-    }))
+    const members = surfaceNodes.map((node) => {
+      const dutyItemCount = node.dutyItems?.length ?? 0
+      const showIncomplete = !(
+        hasDutyAssignment(node) ||
+        dutyItemCount > 0 ||
+        Boolean(node.prompt?.trim())
+      )
+      return {
+        id: node.id,
+        ...estimateWorkGroupMemberChipSize({
+          title: node.title || 'Agent',
+          prompt: node.prompt,
+          dutyItemCount,
+          showIncomplete,
+        }),
+      }
+    })
 
     let frameOrigin = group.origin
     if (!frameOrigin) {
@@ -902,17 +1529,34 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     const positionById = new Map(
       laidOut.positions.map((item) => [item.id, { x: item.x, y: item.y }]),
     )
-    const memberBounds = laidOut.positions.map((item) => {
-      const size = members.find((member) => member.id === item.id)!
-      return {
-        id: item.id,
-        x: item.x,
-        y: item.y,
-        width: size.width,
-        height: size.height,
-      }
+    const positionsUnchanged = surfaceNodes.every((node) => {
+      const next = positionById.get(node.id)
+      return (
+        next &&
+        Math.abs(next.x - node.position.x) < 0.5 &&
+        Math.abs(next.y - node.position.y) < 0.5
+      )
     })
-    const frame = computeLoopWorkGroupFrameBounds(memberBounds)
+    const nextOrigin = (() => {
+      const memberBounds = laidOut.positions.map((item) => {
+        const size = members.find((member) => member.id === item.id)!
+        return {
+          id: item.id,
+          x: item.x,
+          y: item.y,
+          width: size.width,
+          height: size.height,
+        }
+      })
+      const frame = computeLoopWorkGroupFrameBounds(memberBounds)
+      return frame ? { x: frame.x, y: frame.y } : frameOrigin
+    })()
+    const originUnchanged =
+      Boolean(group.origin) &&
+      Math.abs((group.origin?.x ?? 0) - nextOrigin.x) < 0.5 &&
+      Math.abs((group.origin?.y ?? 0) - nextOrigin.y) < 0.5
+    if (positionsUnchanged && originUnchanged) return
+
     const now = new Date().toISOString()
     // Keep provides satellites tethered to each surface agent through the
     // matrix move so a later leave can carry them with the exit delta.
@@ -946,9 +1590,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         item.id === workGroupId
           ? {
               ...item,
-              origin: frame
-                ? { x: frame.x, y: frame.y }
-                : frameOrigin,
+              origin: nextOrigin,
               updatedAt: now,
             }
           : item,
@@ -1177,10 +1819,79 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       set({ error: 'Work groups can only be edited while the loop is in draft' })
       return
     }
-    const memberIds = new Set(
-      (current.draft.workGroups ?? []).find((group) => group.id === workGroupId)
-        ?.memberNodeIds ?? [],
+    const group = (current.draft.workGroups ?? []).find(
+      (item) => item.id === workGroupId,
     )
+    if (!group) return
+    const memberIds = new Set(group.memberNodeIds)
+
+    // Departments are atomic on the graph: cancel/delete removes the frame
+    // and every current member (plus their provides satellites). Plain work
+    // groups still release members back to L1. Add/remove while the department
+    // exists is unchanged — only dissolve is hard-delete.
+    if (isLoopDepartmentWorkGroup(group)) {
+      const removeIds = new Set(memberIds)
+      for (const edge of current.draft.edges) {
+        if (edge.kind !== 'provides' || !memberIds.has(edge.target)) continue
+        const sat = current.draft.nodes.find((node) => node.id === edge.source)
+        if (sat && isConfigNode(sat)) removeIds.add(sat.id)
+      }
+      const remainingIds = new Set(
+        current.draft.nodes
+          .filter((node) => !removeIds.has(node.id))
+          .map((node) => node.id),
+      )
+      const nextLayers = pruneLoopLayerMembers(
+        current.draft.layers ?? [],
+        remainingIds,
+      )
+      let draft: IntentGraph = {
+        ...current.draft,
+        revision: current.draft.revision + 1,
+        nodes: current.draft.nodes.filter((node) => !removeIds.has(node.id)),
+        edges: current.draft.edges.filter(
+          (edge) =>
+            edge.source !== workGroupId &&
+            edge.target !== workGroupId &&
+            !removeIds.has(edge.source) &&
+            !removeIds.has(edge.target),
+        ),
+        workGroups: (current.draft.workGroups ?? []).filter(
+          (item) => item.id !== workGroupId,
+        ),
+        layers: nextLayers,
+      }
+      const normalized = normalizeWiringLists(draft, newLoopEntityId)
+      if (normalized.changed) draft = normalized.draft
+      const selectedLayerId = get().selectedLayerId
+      set({
+        document: patchDraftDocument(current, draft),
+        selectedWorkGroupId:
+          get().selectedWorkGroupId === workGroupId
+            ? null
+            : get().selectedWorkGroupId,
+        focusedWorkGroupId:
+          get().focusedWorkGroupId === workGroupId
+            ? null
+            : get().focusedWorkGroupId,
+        connectingFromId:
+          get().connectingFromId === workGroupId ||
+          (get().connectingFromId
+            ? removeIds.has(get().connectingFromId!)
+            : false)
+            ? null
+            : get().connectingFromId,
+        selectedLayerId:
+          selectedLayerId &&
+          !nextLayers.some((layer) => layer.id === selectedLayerId)
+            ? null
+            : selectedLayerId,
+        error: null,
+      })
+      get().schedulePersist()
+      return
+    }
+
     const draft: IntentGraph = {
       ...current.draft,
       revision: current.draft.revision + 1,
@@ -1192,7 +1903,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         return rest
       }),
       workGroups: (current.draft.workGroups ?? []).filter(
-        (group) => group.id !== workGroupId,
+        (item) => item.id !== workGroupId,
       ),
       edges: current.draft.edges.filter(
         (edge) => edge.source !== workGroupId && edge.target !== workGroupId,
@@ -1289,6 +2000,9 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     for (const node of specialists) {
       get().addNodeToWorkGroup(workGroupId, node.id)
     }
+    const coordinatorId = specialists[0]!.id
+    get().updateWorkGroup(workGroupId, { coordinatorNodeId: coordinatorId })
+    get().applySupervisorDutiesToNode(coordinatorId)
     return workGroupId
   },
 
@@ -1306,7 +2020,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       // Match LOOP_WORK_GROUP_MEMBER_H + STACK_GAP in loopWiringVisuals.
       const memberPitch = 28 + 10
       const nodeId = await get().beginAuthorNodeFromPalette(
-        'agent.coder',
+        'agent.specialist',
         {
           x: position.x + 24,
           y: position.y + 40 + index * memberPitch,
@@ -1330,7 +2044,108 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       return null
     }
     get().updateWorkGroup(workGroupId, { coordinatorNodeId: nodeIds[0]! })
+    get().applySupervisorDutiesToNode(nodeIds[0]!)
     get().setSelectedWorkGroupId(workGroupId)
+    return workGroupId
+  },
+
+  placeDepartmentWorkGroup: async (departmentPaletteId, position) => {
+    const template = getLoopDepartmentTemplate(departmentPaletteId)
+    if (!template) {
+      set({ error: `Unknown department: ${departmentPaletteId}` })
+      return null
+    }
+    if (get().phase !== 'draw') {
+      set({ error: 'Work groups can only be edited while the loop is in draft' })
+      return null
+    }
+    const workGroupId = get().createWorkGroupAt(position)
+    if (!workGroupId) return null
+    // Tag as department before placing members so a failed place → dissolve
+    // hard-deletes partial members instead of releasing them to L1.
+    // Title stays department-only until the user names the task.
+    get().updateWorkGroup(workGroupId, {
+      departmentTemplateId: template.id,
+      taskTitle: null,
+    })
+
+    const nodeIds: string[] = []
+    // Match LOOP_WORK_GROUP_MEMBER chip pitch used by talent squads.
+    const memberPitch = 28 + 10
+
+    // Seed a visible Supervisor seat first — it is the department coordinator.
+    const supervisorId = await get().beginAuthorNodeFromPalette(
+      LOOP_WORK_GROUP_SUPERVISOR_PALETTE_ID,
+      {
+        x: position.x + 24,
+        y: position.y + 40,
+      },
+      {
+        agentDefinitionId: `builtin:${LOOP_WORK_GROUP_SUPERVISOR_LISTING_ID}`,
+        title: 'Supervisor',
+        agentRole: 'planner',
+      },
+    )
+    if (supervisorId) {
+      get().applySupervisorDutiesToNode(supervisorId)
+      if (get().addNodeToWorkGroup(workGroupId, supervisorId)) {
+        nodeIds.push(supervisorId)
+      }
+    }
+
+    let index = nodeIds.length
+    for (const memberPaletteId of template.memberPaletteIds) {
+      const seed = getLoopPaletteItem(memberPaletteId)?.seed
+      const nodeId = await get().beginAuthorNodeFromPalette(
+        memberPaletteId,
+        {
+          x: position.x + 24,
+          y: position.y + 40 + index * memberPitch,
+        },
+      )
+      if (nodeId) {
+        const placed = get().document?.draft.nodes.find(
+          (node) => node.id === nodeId,
+        )
+        // Offline / catalog-miss: still bind a stable specialist id so L1
+        // work-group membership accepts the curated seat.
+        if (placed && !placed.agentDefinitionId) {
+          const listingId = loopPaletteAgentListingId(memberPaletteId)
+          get().setNodeAgentDefinition(
+            nodeId,
+            `builtin:${listingId ?? memberPaletteId}`,
+            {
+              title: seed?.title,
+              ...(seed?.agentRole ? { agentRole: seed.agentRole } : {}),
+            },
+          )
+        }
+        if (get().addNodeToWorkGroup(workGroupId, nodeId)) {
+          nodeIds.push(nodeId)
+        }
+      }
+      index += 1
+    }
+
+    if (nodeIds.length === 0) {
+      get().dissolveWorkGroup(workGroupId)
+      set({
+        error: `Could not place agents for department "${template.title}"`,
+      })
+      return null
+    }
+
+    const coordinatorId = supervisorId && nodeIds.includes(supervisorId)
+      ? supervisorId
+      : nodeIds[0]!
+    get().updateWorkGroup(workGroupId, {
+      coordinatorNodeId: coordinatorId,
+      collaborationMode: 'coordinator',
+    })
+    get().applySupervisorDutiesToNode(coordinatorId)
+    get().reflowWorkGroupSurfaceLayout(workGroupId)
+    get().setSelectedWorkGroupId(workGroupId)
+    get().requestWorkGroupTaskEdit(workGroupId)
     return workGroupId
   },
 
@@ -1607,15 +2422,24 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       const document = await client.getLoopGraph(project.projectId, loopId)
       const heads = await client.listLoopGraphs(project.projectId)
       const pack = document?.taskPack
+      let nextDocument = document
+      let shouldPersistNormalize = false
+      if (document) {
+        const normalized = normalizeWiringLists(document.draft, newLoopEntityId)
+        if (normalized.changed) {
+          nextDocument = patchDraftDocument(document, normalized.draft)
+          shouldPersistNormalize = true
+        }
+      }
       set({
         activeLoopId: loopId,
-        document,
+        document: nextDocument,
         heads,
-        compileResult: document?.pendingCompile
+        compileResult: nextDocument?.pendingCompile
           ? {
-              specDraft: document.pendingCompile.specDraft,
-              assumptions: document.pendingCompile.assumptions,
-              cycleGates: document.pendingCompile.cycleGates,
+              specDraft: nextDocument.pendingCompile.specDraft,
+              assumptions: nextDocument.pendingCompile.assumptions,
+              cycleGates: nextDocument.pendingCompile.cycleGates,
             }
           : null,
         loading: false,
@@ -1635,6 +2459,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         runBranch: pack?.branch ?? '',
         preflightResult: null,
       })
+      if (shouldPersistNormalize) get().schedulePersist()
     } catch (error) {
       set({
         loading: false,
@@ -1801,8 +2626,93 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
      * Returns the workGroupId string so Overlay/Palette `onPlaced` can select it.
      */
     if (paletteItemId === 'workgroup.create') {
-      return get().createWorkGroupAt(position)
+      return get().createWorkGroupWithSupervisorAt(position)
     }
+    /**
+     * Built-in department templates place a titled work group + curated members.
+     * Returns the workGroupId (same contract as workgroup.create).
+     */
+    if (isLoopDepartmentPaletteItem(paletteItemId)) {
+      return get().placeDepartmentWorkGroup(paletteItemId, position)
+    }
+    // Workforce picker entry is not a placeable seed by itself.
+    if (paletteItemId === 'agent.workforce') {
+      set({ error: 'Pick a specialist from My Agents' })
+      return null
+    }
+
+    let agentDefinitionId = options?.agentDefinitionId
+    let title = options?.title
+    let agentRole = options?.agentRole
+    let wiringBase = options?.wiringBase
+
+    // Built-in Work Group Supervisor is not a marketplace listing — bind a
+    // stable builtin id so L1 membership / chip render never depend on catalog.
+    if (
+      paletteItemId === LOOP_WORK_GROUP_SUPERVISOR_PALETTE_ID &&
+      agentDefinitionId === undefined
+    ) {
+      agentDefinitionId = `builtin:${LOOP_WORK_GROUP_SUPERVISOR_LISTING_ID}`
+      title = title ?? 'Supervisor'
+      agentRole = agentRole ?? 'planner'
+    }
+
+    const listingId = loopPaletteAgentListingId(paletteItemId)
+    if (
+      listingId &&
+      agentDefinitionId === undefined &&
+      paletteItemId !== LOOP_WORK_GROUP_SUPERVISOR_PALETTE_ID
+    ) {
+      const wb = useWorkbenchStore.getState()
+      const { client, project } = wb
+      if (client?.listWorkforceAgents && project) {
+        try {
+          let listed = await client.listWorkforceAgents({
+            projectId: project.projectId,
+          })
+          let match = listed.agents.find(
+            (agent) => agent.config.marketplaceProvenance?.listingId === listingId,
+          )
+          if (!match && wb.installAgentFromCatalog) {
+            const installed = await wb.installAgentFromCatalog({ listingId })
+            match = installed?.definition ?? undefined
+            if (!match) {
+              listed = await client.listWorkforceAgents({
+                projectId: project.projectId,
+              })
+              match = listed.agents.find(
+                (agent) =>
+                  agent.config.marketplaceProvenance?.listingId === listingId,
+              )
+            }
+          }
+          if (match) {
+            agentDefinitionId = match.definitionId
+            title = title ?? match.config.displayName
+            const settings = wb.settings
+            const defaultModelId =
+              match.config.modelProfileId ??
+              settings?.execution?.defaultModelProfileId ??
+              settings?.modelProfiles?.find((profile) => profile.isDefault)?.id ??
+              settings?.modelProfiles?.[0]?.id
+            wiringBase = wiringBase ?? {
+              modelProfileId: defaultModelId ?? undefined,
+              skillIds: match.config.skillIds ?? [],
+              mcpServerIds: match.config.mcpServerIds ?? [],
+            }
+          }
+        } catch (error) {
+          set({
+            error:
+              error instanceof Error
+                ? error.message
+                : 'Failed to bind curated specialist agent',
+          })
+        }
+      }
+      agentRole = agentRole ?? item.seed.agentRole
+    }
+
     const sessionId = await ensureAuthoringSession()
     if (!sessionId) return null
 
@@ -1812,11 +2722,9 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     })
     const node = withArchitectureDefaults({
       ...seeded,
-      ...(options?.title ? { title: options.title.slice(0, 120) } : {}),
-      ...(options?.agentDefinitionId !== undefined
-        ? { agentDefinitionId: options.agentDefinitionId }
-        : {}),
-      ...(options?.agentRole ? { agentRole: options.agentRole } : {}),
+      ...(title ? { title: title.slice(0, 120) } : {}),
+      ...(agentDefinitionId !== undefined ? { agentDefinitionId } : {}),
+      ...(agentRole ? { agentRole } : {}),
       ...(options?.configRef
         ? { configRef: { ...(seeded.configRef ?? {}), ...options.configRef } }
         : {}),
@@ -1840,8 +2748,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       error: null,
     })
     get().schedulePersist()
-    if (options?.wiringBase) {
-      get().expandAgentWiring(node.id, options.wiringBase, {
+    if (wiringBase) {
+      get().expandAgentWiring(node.id, wiringBase, {
         replaceExistingProvides: true,
       })
     }
@@ -2148,11 +3056,19 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         },
       ]
     }
-    const draft: IntentGraph = {
+    let draft: IntentGraph = {
       ...current.draft,
       revision: current.draft.revision + 1,
       nodes: [...current.draft.nodes, node],
       edges,
+    }
+    // Auto-collapse MCP/Skills past threshold into a list satellite.
+    if (
+      input.wireToAgentId &&
+      (input.satelliteKind === 'mcp' || input.satelliteKind === 'skill')
+    ) {
+      const normalized = normalizeWiringLists(draft, newLoopEntityId)
+      if (normalized.changed) draft = normalized.draft
     }
     const linkedSessionIds = current.linkedSessionIds.includes(sessionId)
       ? current.linkedSessionIds
@@ -2166,7 +3082,69 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       error: null,
     })
     get().schedulePersist()
+    // After collapse the individual id may no longer exist — return list id if so.
+    if (draft.nodes.some((item) => item.id === node.id)) return node.id
+    if (input.wireToAgentId) {
+      const port = configPortForSatelliteKind(input.satelliteKind) as
+        | WiringListMemberKind
+        | string
+      if (port === 'mcp' || port === 'skill') {
+        const list = draft.nodes.find(
+          (item) =>
+            item.satelliteKind ===
+              (port === 'mcp' ? 'mcp_list' : 'skill_list') &&
+            draft.edges.some(
+              (edge) =>
+                edge.kind === 'provides' &&
+                edge.source === item.id &&
+                edge.target === input.wireToAgentId,
+            ),
+        )
+        if (list) return list.id
+      }
+    }
     return node.id
+  },
+
+  normalizeWiringListsNow: () => {
+    const current = get().document
+    if (!current) return false
+    const normalized = normalizeWiringLists(current.draft, newLoopEntityId)
+    if (!normalized.changed) return false
+    set({
+      document: patchDraftDocument(current, normalized.draft),
+      error: null,
+    })
+    get().schedulePersist()
+    return true
+  },
+
+  appendWiringListMember: (listNodeId, member) => {
+    const current = get().document
+    if (!current) return false
+    const appended = appendWiringListMember(current.draft, listNodeId, member)
+    if (!appended) return false
+    const normalized = normalizeWiringLists(appended, newLoopEntityId)
+    set({
+      document: patchDraftDocument(current, normalized.draft),
+      error: null,
+    })
+    get().schedulePersist()
+    return true
+  },
+
+  removeWiringListMember: (listNodeId, memberId) => {
+    const current = get().document
+    if (!current) return false
+    const removed = removeWiringListMember(current.draft, listNodeId, memberId)
+    if (!removed) return false
+    const normalized = normalizeWiringLists(removed, newLoopEntityId)
+    set({
+      document: patchDraftDocument(current, normalized.draft),
+      error: null,
+    })
+    get().schedulePersist()
+    return true
   },
 
   applyLoopPreset: async (presetId) => {
@@ -2259,7 +3237,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         return null
       }
       if (!workGroupPort) {
-        workGroupPort = sourceIsWorkGroup ? 'out' : 'in'
+        workGroupPort = sourceIsWorkGroup ? 'e' : 'w'
       }
     } else if (sourceNode && targetNode) {
       const sourceIsConfig = isConfigNode(sourceNode)
@@ -2292,6 +3270,30 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         set({
           connectingFromId: null,
           error: 'Config satellites only connect to Agent nodes via provides',
+        })
+        return null
+      }
+    }
+
+    // L1: work-group member chips are not workflow endpoints — wire the frame.
+    // L2 (focusedWorkGroupId) still allows interior collaboration edges.
+    // provides (config → agent) stays allowed so wiring satellites can attach.
+    if (!get().focusedWorkGroupId && kind !== 'provides') {
+      const sourceIsL1Member =
+        Boolean(sourceNode?.workGroupId) &&
+        sourceNode !== undefined &&
+        !isConfigNode(sourceNode) &&
+        !sourceIsWorkGroup
+      const targetIsL1Member =
+        Boolean(targetNode?.workGroupId) &&
+        targetNode !== undefined &&
+        !isConfigNode(targetNode) &&
+        !targetIsWorkGroup
+      if (sourceIsL1Member || targetIsL1Member) {
+        set({
+          connectingFromId: null,
+          error:
+            'Connect to the work group frame on the top-level graph — member agents are not endpoints',
         })
         return null
       }
@@ -2334,6 +3336,24 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     const sessionId = await ensureAuthoringSession()
     if (!sessionId) return null
 
+    // Condition / Human Approval: seed branchKey from the source port. The
+    // overlay fills / refreshes `branchLabel` from i18n and always follows port
+    // reassignment (see syncDecisionBranchLabels).
+    let sourcePort = ports?.sourcePort
+    let branchKey: string | undefined
+    if (
+      kind !== 'provides' &&
+      sourceNode &&
+      isDecisionBranchSourceNode(sourceNode)
+    ) {
+      sourcePort = sourcePort ?? 's'
+      const branchKind = decisionBranchKindForNode(sourceNode)
+      branchKey = decisionBranchKeyForPort(sourcePort, branchKind)
+      if (branchKind === 'condition') {
+        kind = kind ?? 'conditional'
+      }
+    }
+
     const edge: IntentGraphEdge = {
       id: newLoopEntityId('edge'),
       source,
@@ -2341,7 +3361,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       ...(kind ? { kind } : {}),
       ...(configPort ? { configPort } : {}),
       ...(workGroupPort ? { workGroupPort } : {}),
-      ...(ports?.sourcePort ? { sourcePort: ports.sourcePort } : {}),
+      ...(sourcePort ? { sourcePort } : {}),
       ...(ports?.targetPort ? { targetPort: ports.targetPort } : {}),
       ...(ports?.sourcePortIndex != null
         ? { sourcePortIndex: ports.sourcePortIndex }
@@ -2349,6 +3369,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       ...(ports?.targetPortIndex != null
         ? { targetPortIndex: ports.targetPortIndex }
         : {}),
+      ...(branchKey ? { branchKey } : {}),
       ...(kind === 'provides' ? { prompt: '' } : {}),
       authoringSessionId: sessionId,
     }
@@ -2413,15 +3434,21 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         const draft: IntentGraph = {
           ...current.draft,
           revision: current.draft.revision + 1,
-          nodes: current.draft.nodes.map((node) =>
-            node.id === target.id
-              ? {
-                  ...node,
-                  title: title.slice(0, 120) || UNTITLED_NODE,
-                  prompt,
-                }
-              : node,
-          ),
+          nodes: current.draft.nodes.map((node) => {
+            if (node.id !== target.id) return node
+            const kind = node.type === 'human' ? 'human' : 'machine'
+            const dutyItems = dutyItemsFromPrompt(prompt, {
+              kind,
+              source: 'authoring',
+            })
+            return {
+              ...node,
+              title: title.slice(0, 120) || UNTITLED_NODE,
+              prompt,
+              dutyItems,
+              dutyEdited: true,
+            }
+          }),
         }
         set({ document: patchDraftDocument(current, draft), applying: false })
         get().schedulePersist()
@@ -2474,7 +3501,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       if (!node) return
       let sessionId = node.authoringSessionId
       if (!sessionId) {
-        sessionId = (await ensureAuthoringSession()) ?? undefined
+        sessionId =
+          (await ensureAuthoringSession({ openPanel: true })) ?? undefined
         if (!sessionId) return
         const draft: IntentGraph = {
           ...current.draft,
@@ -2506,7 +3534,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     if (!edge) return
     let sessionId = edge.authoringSessionId
     if (!sessionId) {
-      sessionId = (await ensureAuthoringSession()) ?? undefined
+      sessionId =
+        (await ensureAuthoringSession({ openPanel: true })) ?? undefined
       if (!sessionId) return
       const draft: IntentGraph = {
         ...current.draft,
@@ -2545,7 +3574,16 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
           ? collectOrphanConfigNodeIds(current.draft, node.id)
           : []
       const removeIds = new Set([target.id, ...orphanIds])
-      const draft: IntentGraph = {
+      const remainingIds = new Set(
+        current.draft.nodes
+          .filter((item) => !removeIds.has(item.id))
+          .map((item) => item.id),
+      )
+      const nextLayers = pruneLoopLayerMembers(
+        current.draft.layers ?? [],
+        remainingIds,
+      )
+      let draft: IntentGraph = {
         ...current.draft,
         revision: current.draft.revision + 1,
         nodes: current.draft.nodes.filter((item) => !removeIds.has(item.id)),
@@ -2556,10 +3594,14 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
           current.draft.workGroups,
           removeIds,
         ),
+        layers: nextLayers,
       }
+      const normalized = normalizeWiringLists(draft, newLoopEntityId)
+      if (normalized.changed) draft = normalized.draft
       const linkedSessionIds = sessionId
         ? current.linkedSessionIds.filter((id) => id !== sessionId)
         : current.linkedSessionIds
+      const selectedLayerId = get().selectedLayerId
       set({
         document: {
           ...patchDraftDocument(current, draft),
@@ -2568,6 +3610,11 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         pendingDelete: null,
         connectingFromId:
           get().connectingFromId === target.id ? null : get().connectingFromId,
+        selectedLayerId:
+          selectedLayerId &&
+          !nextLayers.some((layer) => layer.id === selectedLayerId)
+            ? null
+            : selectedLayerId,
       })
       get().schedulePersist()
       await archiveAuthoringSession(sessionId)
@@ -2580,7 +3627,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       ? collectOrphansAfterEdgeRemoval(current.draft, edge.id)
       : []
     const orphanSet = new Set(orphanIds)
-    const draft: IntentGraph = {
+    let draft: IntentGraph = {
       ...current.draft,
       revision: current.draft.revision + 1,
       nodes: current.draft.nodes.filter((item) => !orphanSet.has(item.id)),
@@ -2588,6 +3635,8 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         (item) => item.id !== target.id && !orphanSet.has(item.source),
       ),
     }
+    const normalized = normalizeWiringLists(draft, newLoopEntityId)
+    if (normalized.changed) draft = normalized.draft
     const linkedSessionIds = sessionId
       ? current.linkedSessionIds.filter((id) => id !== sessionId)
       : current.linkedSessionIds
@@ -2794,7 +3843,7 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
     }
   },
   startRun: async () => {
-    const { client, project } = useWorkbenchStore.getState()
+    const { client, project, pushToast } = useWorkbenchStore.getState()
     const loopId = get().activeLoopId
     if (!client || !project || !loopId) return
     set({ loading: true, error: null })
@@ -2814,6 +3863,12 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       )
       const heads = await client.listLoopGraphs(project.projectId)
       const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      const armed = document.armedSchedules?.[0]
+      const hasActiveInstance = document.instances.some((item) =>
+        ['queued', 'running', 'paused', 'awaiting_hitl', 'awaiting_review', 'blocked'].includes(
+          item.status,
+        ),
+      )
       // Instance binding holds the run snapshot; restore definition taskPack
       // for the next prep (runOverride must not have mutated Intent draft).
       const pack = document.taskPack
@@ -2827,11 +3882,39 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
         runBranch: pack?.branch ?? get().runBranch,
         preflightResult: null,
       })
+      if (armed && !hasActiveInstance) {
+        pushToast({
+          type: 'info',
+          message: `Schedule armed — createRun at ${new Date(armed.fireAt).toLocaleString()}`,
+          autoDismiss: 5200,
+        })
+      }
     } catch (error) {
       set({
         loading: false,
         error: error instanceof Error ? error.message : 'Start failed',
       })
+    }
+  },
+
+  fireDueSchedules: async () => {
+    const { client, project } = useWorkbenchStore.getState()
+    const loopId = get().activeLoopId
+    if (!client || !project || !loopId || !client.fireDueLoopSchedules) return
+    if (!(get().document?.armedSchedules?.length)) return
+    try {
+      const result = await client.fireDueLoopSchedules(project.projectId, loopId)
+      if (result.fired.length === 0) return
+      const heads = await client.listLoopGraphs(project.projectId)
+      const runHistory = await client.listLoopRunHistory(project.projectId, loopId)
+      set({
+        document: result.document,
+        heads,
+        phase: 'run',
+        runHistory,
+      })
+    } catch {
+      // Best-effort schedule tick.
     }
   },
 
@@ -2970,6 +4053,48 @@ export const useLoopGraphStore = create<LoopGraphStore>((set, get) => ({
       activeLoopId,
       instance.id,
       answers,
+    )
+    set({ document: next })
+  },
+
+  patchDutyProgress: async (nodeId, itemId, status) => {
+    const { client, project } = useWorkbenchStore.getState()
+    const { activeLoopId, document } = get()
+    const instance = [...(document?.instances ?? [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.status === 'awaiting_hitl' ||
+          item.status === 'running' ||
+          item.status === 'paused',
+      )
+    if (!client || !project || !activeLoopId || !instance) return
+    const next = await client.patchLoopDutyProgress(
+      project.projectId,
+      activeLoopId,
+      instance.id,
+      { nodeId, itemId, status },
+    )
+    set({ document: next })
+  },
+
+  mutateDutyChecklist: async (nodeId, mutate) => {
+    const { client, project } = useWorkbenchStore.getState()
+    const { activeLoopId, document } = get()
+    const instance = [...(document?.instances ?? [])]
+      .reverse()
+      .find(
+        (item) =>
+          item.status === 'awaiting_hitl' ||
+          item.status === 'running' ||
+          item.status === 'paused',
+      )
+    if (!client || !project || !activeLoopId || !instance) return
+    const next = await client.mutateLoopDutyChecklist(
+      project.projectId,
+      activeLoopId,
+      instance.id,
+      { nodeId, mutate },
     )
     set({ document: next })
   },

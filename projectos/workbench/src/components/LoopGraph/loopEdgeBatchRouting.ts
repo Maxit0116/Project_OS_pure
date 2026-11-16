@@ -29,12 +29,18 @@ import {
   assignLoopWorkflowPorts,
   type LoopPortAssignment,
 } from './loopPortAssignment'
+import {
+  DECISION_BRANCH_LABEL_T,
+  pointAlongPolyline,
+} from './loopDecisionBranch'
 
 export type LoopBatchedEdgeRoute = {
   edgeId: string
   d: string
   points: Point[]
   mid: Point
+  /** Near-source anchor for decision-branch chips (Condition / Approval). */
+  sourceNear: Point
   labelRect: LabelRect
   sourcePort: LoopPortAssignment['sourcePort']
   targetPort: LoopPortAssignment['targetPort']
@@ -404,6 +410,7 @@ export function routeAllLoopWorkflowEdges(input: {
       d: pointsToRoundedPath(points, LOOP_EDGE_CORNER_RADIUS),
       points,
       mid: placement.point,
+      sourceNear: pointAlongPolyline(points, DECISION_BRANCH_LABEL_T),
       labelRect: placement.labelRect,
       sourcePort,
       targetPort,
@@ -436,6 +443,7 @@ export function routeAllLoopWorkflowEdges(input: {
     })
     route.mid = placement.point
     route.labelRect = placement.labelRect
+    route.sourceNear = pointAlongPolyline(route.points, DECISION_BRANCH_LABEL_T)
     route.d = pointsToRoundedPath(route.points, LOOP_EDGE_CORNER_RADIUS)
   }
 
@@ -445,6 +453,11 @@ export function routeAllLoopWorkflowEdges(input: {
     labelBoxes,
     maxPasses: 6,
   })
+
+  // Lane / overlay shifts may move points — refresh near-source anchors.
+  for (const route of results.values()) {
+    route.sourceNear = pointAlongPolyline(route.points, DECISION_BRANCH_LABEL_T)
+  }
 
   return results
 }

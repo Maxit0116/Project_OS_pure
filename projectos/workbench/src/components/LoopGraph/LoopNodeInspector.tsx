@@ -27,6 +27,7 @@ import TextArea from '../ui/TextArea'
 import TextInput from '../ui/TextInput'
 import Select from '../ui/Select'
 import { validateLoopNodeConfig } from '../../../../services/loop-node-config-schema'
+import LoopNodeDutyEditor from './LoopNodeDutyEditor'
 import styles from './LoopNodeInspector.module.css'
 
 interface Props {
@@ -132,6 +133,11 @@ export default function LoopNodeInspector({
           disabled={readOnly}
           onChange={(event) => onChange({ title: event.target.value })}
         />
+        <LoopNodeDutyEditor
+          node={node}
+          readOnly={readOnly}
+          onChange={onChange}
+        />
         <div className={styles.field}>
           {composeVoice.voice.state.error ? (
             <VoiceInputErrorBanner
@@ -142,12 +148,12 @@ export default function LoopNodeInspector({
           ) : null}
           <div className={styles.promptWrap}>
             <TextArea
-              label={ts('chat.loopGraph.inspectorPrompt')}
+              label={ts('chat.loopGraph.inspectorPromptNotes')}
               fieldClassName={styles.promptField}
               resize="vertical"
               value={node.prompt}
               disabled={readOnly}
-              rows={4}
+              rows={3}
               onChange={(event) => {
                 const value = event.target.value
                 onChange({ prompt: value })

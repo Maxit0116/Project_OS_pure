@@ -1061,8 +1061,14 @@ export interface ProjectOSApi {
       branch?: string;
       materials?: import("./loop-task-materials.js").LoopTaskMaterial[];
       skipPreflight?: boolean;
+      forceImmediate?: boolean;
     },
   ): Promise<LoopGraphDocument>;
+  /** Fire armed wall-clock schedules that are due → createRun. */
+  fireDueLoopSchedules?(
+    projectId: string,
+    loopId: string,
+  ): Promise<{ document: LoopGraphDocument; fired: string[] }>;
   startLoopInstanceWithParams(
     projectId: string,
     loopId: string,
@@ -1142,6 +1148,27 @@ export interface ProjectOSApi {
     loopId: string,
     instanceId: string,
     answers: LoopHitlAnswer[],
+  ): Promise<LoopGraphDocument>;
+  /** Toggle a duty checklist item on a running / HITL instance node. */
+  patchLoopDutyProgress(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      itemId: string;
+      status: import("./loop-duty.js").LoopDutyItemStatus;
+    },
+  ): Promise<LoopGraphDocument>;
+  /** Agent/user structural edits to the live runtime duty checklist. */
+  mutateLoopDutyChecklist(
+    projectId: string,
+    loopId: string,
+    instanceId: string,
+    input: {
+      nodeId: string;
+      mutate: import("./loop-duty.js").LoopDutyChecklistMutateOp;
+    },
   ): Promise<LoopGraphDocument>;
   getLoopInstanceEvents(
     projectId: string,

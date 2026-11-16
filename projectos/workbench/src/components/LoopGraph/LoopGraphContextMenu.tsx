@@ -4,6 +4,7 @@ import {
   Bot,
   ClipboardList,
   GitBranch,
+  Layers,
   Plus,
   Save,
   Trash2,
@@ -46,6 +47,8 @@ interface Props {
   onClose: () => void
   onCreateNode: (world: { x: number; y: number }) => void
   onCreateAgent: () => void
+  /** Arm stage-layer marquee create (blank canvas drag). */
+  onCreateStageLayer?: () => void
   onConnectFrom: (nodeId: string) => void
   onOpenDuty: (nodeId: string) => void
   onSwitchAgent: (nodeId: string, anchor: { x: number; y: number }) => void
@@ -60,6 +63,7 @@ export default function LoopGraphContextMenu({
   onClose,
   onCreateNode,
   onCreateAgent,
+  onCreateStageLayer,
   onConnectFrom,
   onOpenDuty,
   onSwitchAgent,
@@ -151,6 +155,20 @@ export default function LoopGraphContextMenu({
             <UserPlus className={styles.menuItemIcon} size={14} aria-hidden />
             {ts('workforce.createAgentMenu')}
           </button>
+          {onCreateStageLayer ? (
+            <button
+              type="button"
+              role="menuitem"
+              className={styles.menuItem}
+              onClick={() => {
+                onCreateStageLayer()
+                onClose()
+              }}
+            >
+              <Layers className={styles.menuItemIcon} size={14} aria-hidden />
+              {ts('chat.loopGraph.layer.create')}
+            </button>
+          ) : null}
         </>
       ) : null}
 

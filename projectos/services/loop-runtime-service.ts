@@ -1,7 +1,18 @@
 import { createHash, randomUUID } from "node:crypto";
 
 import {
+  areRequiredDutiesComplete,
+  collectUpstreamAgentAcceptance,
+  dutyItemsFromDevPlanTasks,
+  initDutyProgress,
+  markAllDutiesDone,
+  mutateDutyItems,
+  syncDutyProgressWithItems,
+  toggleDutyProgressItem,
   trimLoopInstanceEvents,
+  type LoopDutyChecklistMutateOp,
+  type LoopDutyItem,
+  type LoopDutyItemStatus,
   type LoopGraphDocument,
   type LoopHitlAnswer,
   type LoopInstance,
@@ -29,6 +40,7 @@ import {
   buildHeuristicReviewResult,
   isPlannerAgent,
   isReviewerAgent,
+  readDevPlan,
 } from "./loop-agent-roles.js";
 import {
   isHighRiskTerminalCommand,
@@ -161,10 +173,103 @@ function upsertNodeRecord(
       : prev?.attempt !== undefined
         ? { attempt: prev.attempt }
         : {}),
+    ...(patch.dutyProgress !== undefined
+      ? { dutyProgress: patch.dutyProgress }
+      : prev?.dutyProgress
+        ? { dutyProgress: prev.dutyProgress }
+        : {}),
+    ...(patch.dutyItems !== undefined
+      ? { dutyItems: patch.dutyItems }
+      : prev?.dutyItems
+        ? { dutyItems: prev.dutyItems }
+        : {}),
   };
   if (index >= 0) records[index] = next;
   else records.push(next);
   return { ...instance, nodeRecords: records };
+}
+
+function ensureNodeDutyProgress(
+  instance: LoopInstance,
+  node: LoopSpecNode,
+): LoopInstance {
+  const record = instance.nodeRecords?.find((item) => item.nodeId === node.id);
+  if (record?.dutyProgress && record.dutyProgress.length > 0) {
+    return instance;
+  }
+  const at = nowIso();
+  const sourceItems =
+    record?.dutyItems && record.dutyItems.length > 0
+      ? record.dutyItems
+      : node.acceptance.length > 0
+        ? node.acceptance.map((item) => ({
+            id: item.id,
+            text: item.description,
+            kind: item.kind,
+            required: true as const,
+          }))
+        : [{ id: `acc_${node.id}`, text: node.goal, kind: "machine" as const, required: true }];
+  const dutyProgress = initDutyProgress(sourceItems, at);
+  return upsertNodeRecord(instance, node.id, {
+    status: record?.status ?? "running",
+    ...(record?.dutyItems ? { dutyItems: record.dutyItems } : {}),
+    dutyProgress,
+    updatedAt: at,
+  });
+}
+
+function completeNodeDutyProgress(
+  instance: LoopInstance,
+  nodeId: string,
+): LoopInstance {
+  const record = instance.nodeRecords?.find((item) => item.nodeId === nodeId);
+  if (!record?.dutyProgress?.length) return instance;
+  const at = nowIso();
+  return upsertNodeRecord(instance, nodeId, {
+    status: record.status,
+    dutyProgress: markAllDutiesDone(record.dutyProgress, at),
+    updatedAt: at,
+  });
+}
+
+function acceptanceAsRequired(
+  node: LoopSpecNode,
+  runtimeItems?: LoopDutyItem[] | undefined,
+): Array<{ id: string; required: boolean }> {
+  if (runtimeItems && runtimeItems.length > 0) {
+    return runtimeItems.map((item) => ({
+      id: item.id,
+      required: item.required !== false,
+    }));
+  }
+  return node.acceptance.map((item) => ({ id: item.id, required: true }));
+}
+
+function projectDevPlanDutiesOntoCoder(
+  instance: LoopInstance,
+  node: LoopSpecNode,
+): LoopInstance {
+  const record = instance.nodeRecords?.find((item) => item.nodeId === node.id);
+  if (record?.dutyItems && record.dutyItems.length > 0) {
+    return ensureNodeDutyProgress(instance, node);
+  }
+  const plan = readDevPlan(instance);
+  if (!plan?.tasks?.length) {
+    return ensureNodeDutyProgress(instance, node);
+  }
+  const at = nowIso();
+  const dutyItems = dutyItemsFromDevPlanTasks(plan.tasks);
+  const dutyProgress = syncDutyProgressWithItems(
+    dutyItems,
+    record?.dutyProgress,
+    at,
+  );
+  return upsertNodeRecord(instance, node.id, {
+    status: record?.status ?? "running",
+    dutyItems,
+    dutyProgress,
+    updatedAt: at,
+  });
 }
 
 function recordStatus(
@@ -673,6 +778,7 @@ export function stepLoopInstance(
     return replaceInstance(doc, next);
   }
   next = upsertNodeRecord(next, cursor, { status: "running" });
+  next = ensureNodeDutyProgress(next, node);
 
   // After HITL resolve on human/decide, advance (unless resolveLoopHitl already redirected).
   if (
@@ -860,6 +966,9 @@ function stepLogicNode(
   if (kind === "wait") {
     return stepWaitLogicNode(doc, instance, spec, node);
   }
+  if (kind === "schedule") {
+    return stepScheduleLogicNode(doc, instance, spec, node);
+  }
 
   return failNode(
     doc,
@@ -868,6 +977,31 @@ function stepLogicNode(
     `Unsupported logic kind ${kind}`,
     { spec },
   );
+}
+
+/** In-run Schedule: already fired via createRun arming — pass through. */
+function stepScheduleLogicNode(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpecNode,
+): LoopGraphDocument {
+  let next = upsertNodeRecord(
+    { ...instance, cursorNodeId: node.id, status: "running" },
+    node.id,
+    { status: "running" },
+  );
+  next = pushEvent(next, {
+    type: "node_entered",
+    nodeId: node.id,
+    message: node.goal,
+  });
+  next = pushEvent(next, {
+    type: "node_completed",
+    nodeId: node.id,
+    message: "Schedule gate passed (run started by schedule fire)",
+  });
+  return advanceCursor(doc, next, spec, node.id);
 }
 
 function stepRetryLogicNode(
@@ -1229,9 +1363,13 @@ function stepHumanNode(
   const arch = architectureOf(node);
   const mode = arch.humanMode ?? "approval";
   const questionId = humanQuestionId(node);
+  let seeded = ensureNodeDutyProgress(instance, node);
+  seeded = upsertNodeRecord(seeded, node.id, {
+    status: "waiting_approval",
+  });
   const next = pushEvent(
     {
-      ...instance,
+      ...seeded,
       cursorNodeId: node.id,
       status: "awaiting_hitl",
       hitlQuestionIds: [questionId],
@@ -1266,14 +1404,16 @@ function stepActionNode(
   );
 
   const requiresApproval =
-    arch.actionIntegration === "github" ||
-    arch.actionIntegration === "terminal" ||
-    spec.permissions.some(
-      (perm) =>
-        perm.requiresApproval &&
-        (perm.action.includes(arch.actionOperation ?? "") ||
-          perm.action.includes(arch.actionIntegration ?? "")),
-    );
+    arch.actionIntegration !== "notify" &&
+    arch.actionIntegration !== "lab" &&
+    (arch.actionIntegration === "github" ||
+      arch.actionIntegration === "terminal" ||
+      spec.permissions.some(
+        (perm) =>
+          perm.requiresApproval &&
+          (perm.action.includes(arch.actionOperation ?? "") ||
+            perm.action.includes(arch.actionIntegration ?? "")),
+      ));
 
   const defaultPayload = buildDefaultActionPayload({
     nodeId: node.id,
@@ -1346,6 +1486,12 @@ function stepActionNode(
   }
   if (arch.actionIntegration === "terminal") {
     return stepTerminalAction(doc, next, spec, node, execution, payload, Boolean(hasApproval));
+  }
+  if (arch.actionIntegration === "notify") {
+    return stepNotifyAction(doc, next, spec, node, execution, payload);
+  }
+  if (arch.actionIntegration === "lab") {
+    return stepLabAction(doc, next, spec, node, execution);
   }
   // SaaS connectors (Batch1–3 + Gmail): freeze check + DI settle / fail-closed.
   // Must not fall through to the synthetic "Executed …" success below.
@@ -1529,6 +1675,170 @@ function stepActionNode(
     message: `Action ${arch.actionIntegration}.${arch.actionOperation} completed`,
   });
   return advanceCursor(doc, next, spec, node.id);
+}
+
+/** Fire-and-forget in-app notification — success as soon as delivered (or hooked). */
+function stepNotifyAction(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpecNode,
+  execution: LoopExecutionHooks | undefined,
+  payload: Record<string, unknown>,
+): LoopGraphDocument {
+  const params = node.actionParams ?? {};
+  const title =
+    (typeof payload.title === "string" && payload.title.trim()) ||
+    (typeof params.title === "string" && params.title.trim()) ||
+    node.goal ||
+    "Loop notification";
+  const body =
+    (typeof payload.body === "string" && payload.body.trim()) ||
+    (typeof params.body === "string" && params.body.trim()) ||
+    node.goal ||
+    "A loop step completed.";
+
+  let next: LoopInstance = {
+    ...instance,
+    cursorNodeId: node.id,
+    status: "running",
+  };
+  next = ensureNodeDutyProgress(next, node);
+
+  if (execution?.pushAppNotification) {
+    try {
+      execution.pushAppNotification({
+        title,
+        body,
+        loopId: doc.id,
+        instanceId: instance.id,
+        nodeId: node.id,
+      });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Notification delivery failed";
+      return failNode(doc, next, node.id, message, { spec });
+    }
+  }
+
+  next = completeNodeDutyProgress(next, node.id);
+  next = upsertNodeRecord(next, node.id, { status: "succeeded" });
+  next = pushEvent(next, {
+    type: "node_completed",
+    nodeId: node.id,
+    message: `Notification delivered: ${title}`,
+  });
+  next = {
+    ...next,
+    pendingActionPayload: undefined,
+    pendingApprovalBinding: undefined,
+  };
+  return advanceCursor(doc, next, spec, node.id);
+}
+
+/**
+ * Open Product Lab with merged upstream Agent acceptance; await HITL until
+ * required acceptance / duty items are complete.
+ */
+function stepLabAction(
+  doc: LoopGraphDocument,
+  instance: LoopInstance,
+  spec: LoopSpec,
+  node: LoopSpecNode,
+  execution: LoopExecutionHooks | undefined,
+): LoopGraphDocument {
+  const acceptance = collectUpstreamAgentAcceptance(spec, node.id);
+  const checklist = acceptance.map((item) => ({
+    id: item.id,
+    text: item.description,
+    required: true,
+    ...(item.sourceNodeId ? { sourceNodeId: item.sourceNodeId } : {}),
+  }));
+
+  let next: LoopInstance = {
+    ...instance,
+    cursorNodeId: node.id,
+    status: "running",
+  };
+  next = ensureNodeDutyProgress(next, node);
+  next = pushEvent(next, {
+    type: "node_entered",
+    nodeId: node.id,
+    message: node.goal,
+  });
+
+  if (execution?.startLabVerification) {
+    try {
+      const opened = execution.startLabVerification({
+        loopId: doc.id,
+        instanceId: instance.id,
+        nodeId: node.id,
+        acceptance: checklist,
+      });
+      if (!opened.ok) {
+        return failNode(
+          doc,
+          next,
+          node.id,
+          opened.message || "Failed to open Lab verification session",
+          { spec },
+        );
+      }
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Lab verification failed to start";
+      return failNode(doc, next, node.id, message, { spec });
+    }
+  }
+
+  // Project upstream acceptance onto runtime duty overlay.
+  if (checklist.length > 0) {
+    const at = nowIso();
+    const asDuties: LoopDutyItem[] = checklist.map((item) => ({
+      id: item.id,
+      text: item.text,
+      kind: "human" as const,
+      required: item.required,
+      source: "agent" as const,
+    }));
+    next = upsertNodeRecord(next, node.id, {
+      status: "running",
+      dutyItems: asDuties,
+      dutyProgress: initDutyProgress(asDuties, at),
+      updatedAt: at,
+    });
+  }
+
+  const record = next.nodeRecords?.find((item) => item.nodeId === node.id);
+  if (
+    checklist.length > 0 &&
+    areRequiredDutiesComplete(
+      acceptanceAsRequired(node, record?.dutyItems),
+      record?.dutyProgress,
+    )
+  ) {
+    next = pushEvent(next, {
+      type: "node_completed",
+      nodeId: node.id,
+      message: "Lab acceptance complete",
+    });
+    return advanceCursor(doc, next, spec, node.id);
+  }
+
+  next = {
+    ...next,
+    status: "awaiting_hitl",
+    hitlQuestionIds: [`lab_accept_${node.id}`],
+  };
+  next = pushEvent(next, {
+    type: "awaiting_hitl",
+    nodeId: node.id,
+    message:
+      checklist.length > 0
+        ? `Lab acceptance: complete ${checklist.length} upstream checklist item(s)`
+        : "Lab opened — confirm acceptance to continue",
+  });
+  return replaceInstance(doc, next);
 }
 
 function stepGithubAction(
@@ -2130,6 +2440,10 @@ function stepImplementNode(
           : node.goal,
       });
 
+  if (!polling) {
+    next = projectDevPlanDutiesOntoCoder(next, node);
+  }
+
   let run = polling && next.activeRunId
     ? execution?.readRun(next.activeRunId) ?? null
     : null;
@@ -2286,6 +2600,19 @@ function stepImplementNode(
           [bound.task.id]: (next.attemptCounts[bound.task.id] ?? 0) + 1,
         },
       };
+      const at = nowIso();
+      const record = next.nodeRecords?.find((item) => item.nodeId === node.id);
+      const taskDutyId = `duty_plan_${bound.task.id}`;
+      next = upsertNodeRecord(next, node.id, {
+        status: record?.status ?? "running",
+        dutyProgress: toggleDutyProgressItem(
+          record?.dutyProgress ?? [],
+          taskDutyId,
+          "done",
+          at,
+        ),
+        updatedAt: at,
+      });
     }
     next = recordAgentCallEnd(next);
     next = pushEvent(next, {
@@ -2841,7 +3168,8 @@ function advanceCursor(
   spec: LoopSpec,
   cursor: string,
 ): LoopGraphDocument {
-  let next = upsertNodeRecord(instance, cursor, { status: "succeeded" });
+  let next = completeNodeDutyProgress(instance, cursor);
+  next = upsertNodeRecord(next, cursor, { status: "succeeded" });
   const picked = pickNextCursor(spec, next, cursor);
   next = picked.instance;
   if (!picked.cursor) {
@@ -3437,16 +3765,83 @@ export function resolveLoopHitl(
   const spec = findSpec(doc, instance.specVersion);
   if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
 
+  // Human duty checklist: UI disables Confirm until required items are checked.
+  // Affirmative API release also completes remaining required items (attestation).
+  // Reject / request_changes / takeover / stop leave progress as-is.
+  let gatedInstance = instance;
+  const cursorForGate = instance.cursorNodeId
+    ? spec.nodes.find((item) => item.id === instance.cursorNodeId)
+    : undefined;
+  const humanQuestionsForGate = (instance.hitlQuestionIds ?? []).filter(
+    (id) => id.startsWith("human_") || id.startsWith("decide_"),
+  );
+  if (cursorForGate && humanQuestionsForGate.length > 0) {
+    const primary =
+      answers.find((item) => humanQuestionsForGate.includes(item.questionId)) ??
+      answers[0];
+    const choice = primary?.answer.trim().toLowerCase() ?? "";
+    const isRelease =
+      isApprovalChoice(primary?.answer ?? "") ||
+      /^(accept|approve|continue|确认|放行|通过|同意)$/i.test(choice);
+    const isBypass =
+      /^(reject|denied|deny|request.?changes|takeover|stop|拒绝|驳回|退回|修改|接管|停止)$/i.test(
+        choice,
+      );
+    if (isRelease && !isBypass) {
+      gatedInstance = ensureNodeDutyProgress(gatedInstance, cursorForGate);
+      const record = gatedInstance.nodeRecords?.find(
+        (item) => item.nodeId === cursorForGate.id,
+      );
+      if (
+        !areRequiredDutiesComplete(
+          acceptanceAsRequired(cursorForGate, record?.dutyItems),
+          record?.dutyProgress,
+        )
+      ) {
+        const requireExplicit =
+          primary?.editedPayload &&
+          typeof primary.editedPayload === "object" &&
+          (primary.editedPayload as { requireDutyComplete?: unknown })
+            .requireDutyComplete === true;
+        if (requireExplicit) {
+          return upsertLoopGraph(
+            workspaceRoot,
+            replaceInstance(
+              doc,
+              pushEvent(
+                {
+                  ...instance,
+                  status: "awaiting_hitl",
+                  hitlQuestionIds: instance.hitlQuestionIds,
+                },
+                {
+                  type: "awaiting_hitl",
+                  nodeId: cursorForGate.id,
+                  message:
+                    "Duty checklist incomplete — complete all required items before release",
+                },
+              ),
+            ),
+          );
+        }
+        gatedInstance = completeNodeDutyProgress(
+          gatedInstance,
+          cursorForGate.id,
+        );
+      }
+    }
+  }
+
   const summary = answers.map((item) => `${item.questionId}=${item.answer}`).join("; ");
   let next = pushEvent(
     {
-      ...instance,
+      ...gatedInstance,
       status: "running",
       hitlQuestionIds: [],
     },
     {
       type: "hitl_resolved",
-      nodeId: instance.cursorNodeId ?? undefined,
+      nodeId: gatedInstance.cursorNodeId ?? undefined,
       message: summary || "HITL resolved",
     },
   );
@@ -3934,6 +4329,106 @@ export function resolveLoopHitl(
   let nextDoc = replaceInstance(doc, next);
   nextDoc = stepLoopInstance(nextDoc, instanceId, execution !== undefined ? { execution } : {});
   return upsertLoopGraph(workspaceRoot, nextDoc);
+}
+
+/**
+ * Toggle / set a duty checklist item on the active instance cursor node.
+ * Used by Human (and optionally Agent) run UIs before confirm-release.
+ */
+export function patchLoopDutyProgress(
+  workspaceRoot: string,
+  loopId: string,
+  instanceId: string,
+  input: {
+    nodeId: string;
+    itemId: string;
+    status: LoopDutyItemStatus;
+  },
+): LoopGraphDocument {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const spec = findSpec(doc, instance.specVersion);
+  if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
+  const node = spec.nodes.find((item) => item.id === input.nodeId);
+  if (!node) throw new Error(`Node not found: ${input.nodeId}`);
+
+  let next = ensureNodeDutyProgress(instance, node);
+  const record = next.nodeRecords?.find((item) => item.nodeId === input.nodeId);
+  const at = nowIso();
+  const dutyProgress = toggleDutyProgressItem(
+    record?.dutyProgress ?? [],
+    input.itemId,
+    input.status,
+    at,
+  );
+  next = upsertNodeRecord(next, input.nodeId, {
+    status: record?.status ?? "waiting_approval",
+    dutyProgress,
+    updatedAt: at,
+  });
+  next = pushEvent(next, {
+    type: "message",
+    nodeId: input.nodeId,
+    message: `Duty item ${input.itemId} → ${input.status}`,
+  });
+  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
+}
+
+/**
+ * Agent/user structural edits to the runtime duty checklist (add/update/remove/replace).
+ * Does not mutate Intent draft — only the live instance node record overlay.
+ */
+export function mutateLoopDutyChecklist(
+  workspaceRoot: string,
+  loopId: string,
+  instanceId: string,
+  input: {
+    nodeId: string;
+    mutate: LoopDutyChecklistMutateOp;
+  },
+): LoopGraphDocument {
+  const doc = getLoopGraph(workspaceRoot, loopId);
+  if (!doc) throw new Error(`Loop graph not found: ${loopId}`);
+  const instance = doc.instances.find((item) => item.id === instanceId);
+  if (!instance) throw new Error(`Instance not found: ${instanceId}`);
+  const spec = findSpec(doc, instance.specVersion);
+  if (!spec) throw new Error(`Spec not found: ${instance.specVersion}`);
+  const node = spec.nodes.find((item) => item.id === input.nodeId);
+  if (!node) throw new Error(`Node not found: ${input.nodeId}`);
+
+  let next = ensureNodeDutyProgress(instance, node);
+  const record = next.nodeRecords?.find((item) => item.nodeId === input.nodeId);
+  const at = nowIso();
+  const baseItems: LoopDutyItem[] =
+    record?.dutyItems && record.dutyItems.length > 0
+      ? record.dutyItems
+      : node.acceptance.map((item) => ({
+          id: item.id,
+          text: item.description,
+          kind: item.kind,
+          required: true,
+          source: "migrate" as const,
+        }));
+  const dutyItems = mutateDutyItems(baseItems, input.mutate);
+  const dutyProgress = syncDutyProgressWithItems(
+    dutyItems,
+    record?.dutyProgress,
+    at,
+  );
+  next = upsertNodeRecord(next, input.nodeId, {
+    status: record?.status ?? "running",
+    dutyItems,
+    dutyProgress,
+    updatedAt: at,
+  });
+  next = pushEvent(next, {
+    type: "message",
+    nodeId: input.nodeId,
+    message: `Duty checklist ${input.mutate.op} (${dutyItems.length} items)`,
+  });
+  return upsertLoopGraph(workspaceRoot, replaceInstance(doc, next));
 }
 
 export function getLoopInstanceEvents(

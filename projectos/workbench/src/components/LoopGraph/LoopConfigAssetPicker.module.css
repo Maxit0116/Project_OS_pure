@@ -51,9 +51,10 @@
 
 .row {
   display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   width: 100%;
   text-align: left;
   border: 1px solid transparent;
@@ -69,6 +70,20 @@
   background: var(--tech-bg-muted);
 }
 
+.rowConnected {
+  border-color: color-mix(in srgb, var(--tech-accent) 35%, var(--tech-border));
+  background: color-mix(in srgb, var(--tech-accent) 8%, transparent);
+}
+
+.rowMain {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+
 .rowName {
   display: inline-flex;
   flex-wrap: wrap;
@@ -81,6 +96,18 @@
 .rowMeta {
   font-size: 10px;
   color: var(--tech-text-secondary);
+}
+
+.connectedCheck {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  color: var(--tech-accent);
+  background: color-mix(in srgb, var(--tech-accent) 16%, transparent);
 }
 
 .riskBadge,

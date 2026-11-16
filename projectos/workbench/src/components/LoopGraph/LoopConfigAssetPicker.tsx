@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Check } from 'lucide-react'
 import type { LoopSatelliteKind, McpServerConfig, SkillDescriptor } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import { useChatSessionStore } from '../../state/chatSessionStore'
@@ -20,6 +21,11 @@ interface Props {
   kind: Extract<LoopSatelliteKind, 'model' | 'skill' | 'mcp'>
   /** Screen anchor for the popover. */
   anchor: { x: number; y: number }
+  /**
+   * Asset ids already wired to the current Agent (skillId / mcpServerId /
+   * modelProfileId). Shown with a checkmark in the option list.
+   */
+  connectedIds?: readonly string[]
   onPick: (asset: ConfigAssetPick) => void
   onCancel: () => void
 }
@@ -28,7 +34,13 @@ function isCommunityMcp(server: McpServerConfig): boolean {
   return server.provenance?.trustTier === 'community'
 }
 
-export default function LoopConfigAssetPicker({ kind, anchor, onPick, onCancel }: Props) {
+export default function LoopConfigAssetPicker({
+  kind,
+  anchor,
+  connectedIds,
+  onPick,
+  onCancel,
+}: Props) {
   const { ts } = useI18n()
   const client = useWorkbenchStore((s) => s.client)
   const project = useWorkbenchStore((s) => s.project)
@@ -37,6 +49,10 @@ export default function LoopConfigAssetPicker({ kind, anchor, onPick, onCancel }
   const [skills, setSkills] = useState<SkillDescriptor[]>([])
   const [loading, setLoading] = useState(kind === 'skill')
   const [query, setQuery] = useState('')
+  const connected = useMemo(
+    () => new Set(connectedIds ?? []),
+    [connectedIds],
+  )
 
   useEffect(() => {
     if (kind !== 'skill' || !client?.listSkills || !project) {
@@ -157,44 +173,63 @@ export default function LoopConfigAssetPicker({ kind, anchor, onPick, onCancel }
             ) : null}
           </div>
         ) : (
-          rows.map((row) => (
-            <button
-              key={row.id}
-              type="button"
-              role="option"
-              className={styles.row}
-              onClick={() => {
-                if (kind === 'model') {
-                  onPick({ kind: 'model', id: row.id, name: row.name })
-                } else if (kind === 'skill') {
-                  onPick({ kind: 'skill', id: row.id, name: row.name })
-                } else {
-                  onPick({
-                    kind: 'mcp',
-                    id: row.id,
-                    name: row.name,
-                    community: row.community,
-                    enabled: row.enabled,
-                  })
-                }
-              }}
-            >
-              <span className={styles.rowName}>
-                {row.name}
-                {row.community ? (
-                  <span className={styles.riskBadge}>
-                    {ts('chat.loopGraph.wiringMcpCommunity')}
+          rows.map((row) => {
+            const isConnected = connected.has(row.id)
+            return (
+              <button
+                key={row.id}
+                type="button"
+                role="option"
+                aria-selected={isConnected}
+                className={`${styles.row} ${
+                  isConnected ? styles.rowConnected : ''
+                }`}
+                onClick={() => {
+                  if (kind === 'model') {
+                    onPick({ kind: 'model', id: row.id, name: row.name })
+                  } else if (kind === 'skill') {
+                    onPick({ kind: 'skill', id: row.id, name: row.name })
+                  } else {
+                    onPick({
+                      kind: 'mcp',
+                      id: row.id,
+                      name: row.name,
+                      community: row.community,
+                      enabled: row.enabled,
+                    })
+                  }
+                }}
+              >
+                <span className={styles.rowMain}>
+                  <span className={styles.rowName}>
+                    {row.name}
+                    {row.community ? (
+                      <span className={styles.riskBadge}>
+                        {ts('chat.loopGraph.wiringMcpCommunity')}
+                      </span>
+                    ) : null}
+                    {!row.enabled && kind === 'mcp' ? (
+                      <span className={styles.warnBadge}>
+                        {ts('chat.loopGraph.wiringMcpDisabled')}
+                      </span>
+                    ) : null}
+                  </span>
+                  {row.meta ? (
+                    <span className={styles.rowMeta}>{row.meta}</span>
+                  ) : null}
+                </span>
+                {isConnected ? (
+                  <span
+                    className={styles.connectedCheck}
+                    title={ts('chat.loopGraph.wiringPickerConnected')}
+                    aria-label={ts('chat.loopGraph.wiringPickerConnected')}
+                  >
+                    <Check size={14} strokeWidth={2.25} aria-hidden />
                   </span>
                 ) : null}
-                {!row.enabled && kind === 'mcp' ? (
-                  <span className={styles.warnBadge}>
-                    {ts('chat.loopGraph.wiringMcpDisabled')}
-                  </span>
-                ) : null}
-              </span>
-              {row.meta ? <span className={styles.rowMeta}>{row.meta}</span> : null}
-            </button>
-          ))
+              </button>
+            )
+          })
         )}
       </div>
     </div>

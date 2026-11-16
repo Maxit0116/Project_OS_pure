@@ -68,6 +68,36 @@ describe("loop-node-config-schema", () => {
     expect(applied.draft.revision).toBe(2);
   });
 
+  it("applies dutyItems patch and derives checklist from prompt-only patch", () => {
+    const base = draft([
+      node({ id: "coder", type: "agent", agentRole: "coder", title: "Coder", prompt: "" }),
+    ]);
+    const withItems = applyIntentNodePatch(base, "coder", {
+      dutyItems: [
+        {
+          id: "d1",
+          text: "Implement login",
+          kind: "machine",
+          required: true,
+          source: "authoring",
+        },
+      ],
+      dutyEdited: true,
+    });
+    expect(withItems.ok).toBe(true);
+    if (!withItems.ok) return;
+    expect(withItems.draft.nodes[0]?.dutyItems).toHaveLength(1);
+    expect(withItems.draft.nodes[0]?.dutyEdited).toBe(true);
+
+    const fromPrompt = applyIntentNodePatch(base, "coder", {
+      prompt: "Ship UI\nWrite tests",
+    });
+    expect(fromPrompt.ok).toBe(true);
+    if (!fromPrompt.ok) return;
+    expect(fromPrompt.draft.nodes[0]?.dutyItems?.length).toBe(2);
+    expect(fromPrompt.draft.nodes[0]?.dutyEdited).toBe(true);
+  });
+
   it("mergePreservingUntargeted keeps non-target ids/edges", () => {
     const base = draft([
       node({ id: "keep", title: "Keep", prompt: "manual", timeoutMs: 9000 }),

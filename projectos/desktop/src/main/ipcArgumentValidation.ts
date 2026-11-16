@@ -273,6 +273,8 @@ const PROJECTOS_IPC_SIGNATURES = {
   cancelLoopInstance: ['string', 'string', 'string'],
   resumeLoopInstance: ['string', 'string', 'string'],
   resolveLoopHitl: ['string', 'string', 'string', 'array'],
+  patchLoopDutyProgress: ['string', 'string', 'string', 'record'],
+  mutateLoopDutyChecklist: ['string', 'string', 'string', 'record'],
   getLoopInstanceEvents: ['string', 'string', 'string'],
   advanceLoopInstance: ['string', 'string', 'string'],
   sendLoopAuthoringTurn: ['string', 'string', 'record'],

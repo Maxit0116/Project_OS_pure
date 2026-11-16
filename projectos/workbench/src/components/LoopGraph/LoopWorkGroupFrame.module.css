@@ -15,6 +15,12 @@
   background: color-mix(in srgb, var(--tech-accent-subtle) 35%, transparent);
 }
 
+.passThrough .titleBar,
+.passThrough .emptyHit,
+.passThrough .port {
+  pointer-events: none !important;
+}
+
 .titleBar {
   position: absolute;
   top: 0;
@@ -65,10 +71,53 @@
   outline: none;
 }
 
-.titleText {
+.titleEditRow {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.deptPrefix {
+  flex-shrink: 0;
+  max-width: 42%;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--tech-text-secondary);
+  font-weight: 600;
+}
+
+.deptSep {
+  font-weight: 500;
+  color: var(--tech-text-tertiary, var(--tech-text-secondary));
+}
+
+.titleText {
+  appearance: none;
+  display: block;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: text;
+  border-radius: 3px;
+}
+
+.titleText:hover {
+  background: color-mix(in srgb, var(--tech-bg-muted) 55%, transparent);
+}
+
+.titleText:focus-visible {
+  box-shadow: var(--tech-shadow-focus);
+}
+
+.titleTextNeedsTask {
+  font-style: italic;
+  color: var(--tech-text-secondary);
 }
 
 .titleInput {
@@ -180,10 +229,8 @@
 
 .port {
   position: absolute;
-  top: 50%;
   width: 10px;
   height: 10px;
-  margin-top: -5px;
   padding: 0;
   border-radius: 999px;
   border: 1.5px solid var(--tech-accent);
@@ -198,10 +245,26 @@
   box-shadow: var(--tech-shadow-focus);
 }
 
-.portIn {
-  left: -5px;
+.portN {
+  top: -5px;
+  left: 50%;
+  margin-left: -5px;
 }
 
-.portOut {
+.portE {
+  top: 50%;
   right: -5px;
+  margin-top: -5px;
+}
+
+.portS {
+  bottom: -5px;
+  left: 50%;
+  margin-left: -5px;
+}
+
+.portW {
+  top: 50%;
+  left: -5px;
+  margin-top: -5px;
 }

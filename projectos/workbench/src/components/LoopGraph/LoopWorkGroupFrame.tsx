@@ -5,52 +5,82 @@ import {
   type KeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
-import { Crown, MoreHorizontal, Users } from 'lucide-react'
+import { Building2, Crown, MoreHorizontal, Users } from 'lucide-react'
 import type {
   LoopWorkGroupCollaborationMode,
   LoopWorkGroupFrameBounds,
   LoopWorkGroupPort,
 } from '@contracts/index'
+import { LOOP_WORK_GROUP_PORTS } from '@contracts/index'
 import { useI18n } from '../../i18n'
 import styles from './LoopWorkGroupFrame.module.css'
 
 interface Props {
   workGroupId: string
+  /** Full display title (department · task or task). */
   title: string
+  /** Editable task segment only. */
+  taskTitle: string
+  /** Locked department label when this is a built-in department. */
+  departmentName?: string | null
   bounds: LoopWorkGroupFrameBounds
   memberCount: number
   selected: boolean
   collaborationMode: LoopWorkGroupCollaborationMode
   coordinatorTitle?: string | null
+  /** Built-in department: dissolve deletes members with the frame. */
+  isDepartment?: boolean
+  /** Open task editing as soon as this frame mounts / becomes pending. */
+  startTaskEdit?: boolean
   showPorts: boolean
+  /** Stage-layer create marquee armed — chrome ignores pointers. */
+  pointerPassThrough?: boolean
   onSelect: () => void
-  onRename: (title: string) => void
+  /** Commits the task name (not the full display title). */
+  onRename: (taskTitle: string) => void
+  onTaskEditConsumed?: () => void
   onTitleDragMove: (delta: { dx: number; dy: number }) => void
+  /** Fired when title-bar pointer capture ends (commit work-group geometry). */
+  onTitleDragEnd?: () => void
   onDissolve: () => void
   /** Double-click title bar → open secondary (L2) collaboration graph. */
   onOpenInterior: () => void
   onPortPointerDown: (workGroupId: string, port: LoopWorkGroupPort) => void
 }
 
+const PORT_CLASS: Record<LoopWorkGroupPort, string> = {
+  n: styles.portN,
+  e: styles.portE,
+  s: styles.portS,
+  w: styles.portW,
+}
+
 export default function LoopWorkGroupFrame({
   workGroupId,
   title,
+  taskTitle,
+  departmentName,
   bounds,
   memberCount,
   selected,
   collaborationMode,
   coordinatorTitle,
+  isDepartment = false,
+  startTaskEdit = false,
   showPorts,
+  pointerPassThrough = false,
   onSelect,
   onRename,
+  onTaskEditConsumed,
   onTitleDragMove,
+  onTitleDragEnd,
   onDissolve,
   onOpenInterior,
   onPortPointerDown,
 }: Props) {
   const { ts } = useI18n()
   const [editing, setEditing] = useState(false)
-  const [draftTitle, setDraftTitle] = useState(title)
+  const [draftTask, setDraftTask] = useState(taskTitle)
   const [menuOpen, setMenuOpen] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const dragRef = useRef<{ px: number; py: number; lastX: number; lastY: number } | null>(
@@ -58,8 +88,17 @@ export default function LoopWorkGroupFrame({
   )
 
   useEffect(() => {
-    if (!editing) setDraftTitle(title)
-  }, [title, editing])
+    if (!editing) setDraftTask(taskTitle)
+  }, [taskTitle, editing])
+
+  useEffect(() => {
+    if (!startTaskEdit) return
+    setEditing(true)
+    setMenuOpen(false)
+    onTaskEditConsumed?.()
+    // Only react to the pending flag — avoid re-opening when parent re-renders.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onTaskEditConsumed is a stable clear
+  }, [startTaskEdit])
 
   useEffect(() => {
     if (!editing) return
@@ -67,22 +106,28 @@ export default function LoopWorkGroupFrame({
     inputRef.current?.select()
   }, [editing])
 
-  const commitTitle = () => {
-    const next = draftTitle.trim()
-    if (next && next !== title) onRename(next)
-    else setDraftTitle(title)
+  const commitTask = () => {
+    const next = draftTask.trim()
+    if (next !== taskTitle.trim()) onRename(next)
+    else setDraftTask(taskTitle)
     setEditing(false)
   }
 
-  const onTitleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+  const onTaskKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     event.stopPropagation()
     if (event.key === 'Enter') {
-      commitTitle()
+      commitTask()
     }
     if (event.key === 'Escape') {
-      setDraftTitle(title)
+      setDraftTask(taskTitle)
       setEditing(false)
     }
+  }
+
+  const beginTaskEdit = () => {
+    onSelect()
+    setMenuOpen(false)
+    setEditing(true)
   }
 
   const onTitlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -109,7 +154,7 @@ export default function LoopWorkGroupFrame({
     onTitleDragMove({ dx, dy })
   }
 
-  const onTitlePointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const endTitleDrag = (event: ReactPointerEvent<HTMLDivElement>) => {
     const drag = dragRef.current
     dragRef.current = null
     try {
@@ -117,6 +162,7 @@ export default function LoopWorkGroupFrame({
     } catch {
       /* ignore */
     }
+    onTitleDragEnd?.()
     // Suppress accidental open after a real drag.
     if (
       drag &&
@@ -127,10 +173,17 @@ export default function LoopWorkGroupFrame({
   }
 
   const modeLabel = ts(`chat.loopGraph.workGroup.mode.${collaborationMode}`)
+  const TitleIcon = isDepartment ? Building2 : Users
+  const taskPlaceholder = isDepartment
+    ? ts('chat.loopGraph.workGroup.taskPlaceholderDepartment')
+    : ts('chat.loopGraph.workGroup.taskPlaceholder')
+  const needsTask = !taskTitle.trim()
 
   return (
     <div
-      className={`${styles.frame} ${selected ? styles.selected : ''}`}
+      className={`${styles.frame} ${selected ? styles.selected : ''} ${
+        pointerPassThrough ? styles.passThrough : ''
+      }`}
       style={{
         left: bounds.x,
         top: bounds.y,
@@ -138,6 +191,7 @@ export default function LoopWorkGroupFrame({
         height: bounds.height,
       }}
       data-loop-work-group={workGroupId}
+      data-loop-work-group-department={isDepartment ? 'true' : undefined}
     >
       {memberCount === 0 ? (
         <div
@@ -153,29 +207,49 @@ export default function LoopWorkGroupFrame({
         className={styles.titleBar}
         onPointerDown={onTitlePointerDown}
         onPointerMove={onTitlePointerMove}
-        onPointerUp={onTitlePointerUp}
+        onPointerUp={endTitleDrag}
+        onPointerCancel={endTitleDrag}
         onDoubleClick={(event) => {
           event.stopPropagation()
           if (editing) return
           onOpenInterior()
         }}
       >
-        <Users size={13} strokeWidth={1.75} aria-hidden className={styles.titleIcon} />
+        <TitleIcon size={13} strokeWidth={1.75} aria-hidden className={styles.titleIcon} />
         {editing ? (
-          <input
-            ref={inputRef}
-            className={styles.titleInput}
-            value={draftTitle}
-            aria-label={ts('chat.loopGraph.workGroup.title')}
-            onChange={(event) => setDraftTitle(event.target.value)}
-            onBlur={commitTitle}
-            onKeyDown={onTitleKeyDown}
-            onPointerDown={(event) => event.stopPropagation()}
-          />
+          <div className={styles.titleEditRow}>
+            {departmentName ? (
+              <span className={styles.deptPrefix} aria-hidden>
+                {departmentName}
+                <span className={styles.deptSep}> · </span>
+              </span>
+            ) : null}
+            <input
+              ref={inputRef}
+              className={styles.titleInput}
+              value={draftTask}
+              placeholder={taskPlaceholder}
+              aria-label={ts('chat.loopGraph.workGroup.taskLabel')}
+              onChange={(event) => setDraftTask(event.target.value)}
+              onBlur={commitTask}
+              onKeyDown={onTaskKeyDown}
+              onPointerDown={(event) => event.stopPropagation()}
+            />
+          </div>
         ) : (
-          <span className={styles.titleText} title={title}>
+          <button
+            type="button"
+            className={`${styles.titleText} ${needsTask ? styles.titleTextNeedsTask : ''}`}
+            title={`${title} — ${ts('chat.loopGraph.workGroup.rename')}`}
+            aria-label={`${title} — ${ts('chat.loopGraph.workGroup.rename')}`}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={(event) => {
+              event.stopPropagation()
+              beginTaskEdit()
+            }}
+          >
             {title}
-          </span>
+          </button>
         )}
         <span className={styles.memberBadge} title={ts('chat.loopGraph.workGroup.memberCount', { count: memberCount })}>
           {memberCount}
@@ -221,7 +295,7 @@ export default function LoopWorkGroupFrame({
                 onClick={(event) => {
                   event.stopPropagation()
                   setMenuOpen(false)
-                  setEditing(true)
+                  beginTaskEdit()
                 }}
               >
                 {ts('chat.loopGraph.workGroup.rename')}
@@ -236,7 +310,11 @@ export default function LoopWorkGroupFrame({
                   onDissolve()
                 }}
               >
-                {ts('chat.loopGraph.workGroup.dissolve')}
+                {ts(
+                  isDepartment
+                    ? 'chat.loopGraph.workGroup.deleteDepartment'
+                    : 'chat.loopGraph.workGroup.dissolve',
+                )}
               </button>
             </div>
           ) : null}
@@ -247,34 +325,23 @@ export default function LoopWorkGroupFrame({
         <p className={styles.emptyHint}>{ts('chat.loopGraph.workGroup.emptyHint')}</p>
       ) : null}
 
-      {showPorts ? (
-        <>
-          <button
-            type="button"
-            className={`${styles.port} ${styles.portIn}`}
-            aria-label={ts('chat.loopGraph.workGroup.portIn')}
-            data-loop-work-group-port="in"
-            onPointerDown={(event) => {
-              if (event.button !== 0) return
-              event.stopPropagation()
-              onSelect()
-              onPortPointerDown(workGroupId, 'in')
-            }}
-          />
-          <button
-            type="button"
-            className={`${styles.port} ${styles.portOut}`}
-            aria-label={ts('chat.loopGraph.workGroup.portOut')}
-            data-loop-work-group-port="out"
-            onPointerDown={(event) => {
-              if (event.button !== 0) return
-              event.stopPropagation()
-              onSelect()
-              onPortPointerDown(workGroupId, 'out')
-            }}
-          />
-        </>
-      ) : null}
+      {showPorts
+        ? LOOP_WORK_GROUP_PORTS.map((port) => (
+            <button
+              key={port}
+              type="button"
+              className={`${styles.port} ${PORT_CLASS[port]}`}
+              aria-label={ts(`chat.loopGraph.workGroup.port.${port}`)}
+              data-loop-work-group-port={port}
+              onPointerDown={(event) => {
+                if (event.button !== 0) return
+                event.stopPropagation()
+                onSelect()
+                onPortPointerDown(workGroupId, port)
+              }}
+            />
+          ))
+        : null}
     </div>
   )
 }

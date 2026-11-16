@@ -153,6 +153,33 @@ export const LabSessionSchema = z
     chatSessionId: z.string().max(120).nullable().default(null),
     activeFixRunId: z.string().max(120).nullable().default(null),
     startError: z.string().max(1_000).nullable().default(null),
+    /**
+     * Loop Lab node acceptance checklist (upstream Agent acceptance merge).
+     * When present, Lab Card shows this layer above findings.
+     */
+    acceptanceChecklist: z
+      .array(
+        z
+          .object({
+            id: z.string().min(1).max(120),
+            text: z.string().min(1).max(500),
+            required: z.boolean().default(true),
+            done: z.boolean().default(false),
+            sourceNodeId: z.string().min(1).max(120).optional(),
+          })
+          .strict(),
+      )
+      .max(40)
+      .optional(),
+    /** Binding back to the Loop instance Lab Action that opened this session. */
+    loopBinding: z
+      .object({
+        loopId: z.string().min(1).max(120),
+        instanceId: z.string().min(1).max(120),
+        nodeId: z.string().min(1).max(120),
+      })
+      .strict()
+      .optional(),
     createdAt: z.string().min(1).max(64),
     updatedAt: z.string().min(1).max(64),
     endedAt: z.string().max(64).nullable().default(null),

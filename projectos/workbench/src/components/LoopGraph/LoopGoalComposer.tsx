@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { Bot, Check, ChevronUp, MessageSquare, Pencil, Redo2, Settings2, Undo2, X } from 'lucide-react'
+import {
+  Bot,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  MessageSquare,
+  Pencil,
+  Redo2,
+  Settings2,
+  Undo2,
+  X,
+} from 'lucide-react'
 import type { LoopComposerMode, LoopOpenQuestion } from '@contracts/index'
 import { useAutoResizeTextarea } from '../../hooks/useAutoResizeTextarea'
 import { useI18n } from '../../i18n'
@@ -30,6 +41,8 @@ export default function LoopGoalComposer() {
   const loopDocument = useLoopGraphStore((s) => s.document)
   const composerDraft = useLoopGraphStore((s) => s.composerDraft)
   const composerSheet = useLoopGraphStore((s) => s.composerSheet)
+  const composerPromptOpen = useLoopGraphStore((s) => s.composerPromptOpen)
+  const setComposerPromptOpen = useLoopGraphStore((s) => s.setComposerPromptOpen)
   const authoringBusy = useLoopGraphStore((s) => s.authoringBusy)
   const authoringEngine = useLoopGraphStore((s) => s.authoringEngine)
   const setAuthoringEngine = useLoopGraphStore((s) => s.setAuthoringEngine)
@@ -109,11 +122,18 @@ export default function LoopGoalComposer() {
 
   useEffect(() => {
     if (!composerFocusNonce) return
+    setComposerPromptOpen(true)
     const frame = window.requestAnimationFrame(() => {
       textareaRef.current?.focus()
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [composerFocusNonce, textareaRef])
+  }, [composerFocusNonce, setComposerPromptOpen, textareaRef])
+
+  useEffect(() => {
+    if (authoringBusy || needsClarification || Boolean(offer)) {
+      setComposerPromptOpen(true)
+    }
+  }, [authoringBusy, needsClarification, offer, setComposerPromptOpen])
 
   const voiceDisabled =
     !loopDocument || authoringBusy || draftBusy || (mode === 'ask' && needsClarification)
@@ -262,8 +282,9 @@ export default function LoopGoalComposer() {
     <div
       className={`${styles.composer} ${
         flowOpen || contextOpen || clarifyOpen ? styles.composerSheetOpen : ''
-      }`}
+      } ${composerPromptOpen ? styles.composerPromptExpanded : styles.composerPromptCollapsed}`}
       data-loop-goal-composer=""
+      data-loop-composer-prompt={composerPromptOpen ? 'open' : 'collapsed'}
     >
       <div className={styles.bookmarkStack}>
         {flowOpen ? (
@@ -567,7 +588,7 @@ export default function LoopGoalComposer() {
               .then(async (created) => {
                 if (created && options?.placeOnLoop) {
                   const nodeId = await beginAuthorNodeFromPalette(
-                    'agent.coder',
+                    'agent.specialist',
                     { x: 120, y: 120 },
                     {
                       agentDefinitionId: created.definitionId,
@@ -600,7 +621,45 @@ export default function LoopGoalComposer() {
         />
       ) : null}
 
-      <div className={styles.promptDock}>
+      <button
+        type="button"
+        className={styles.promptPullHandle}
+        aria-expanded={composerPromptOpen}
+        aria-controls="loop-goal-prompt-dock"
+        data-testid="loop-composer-prompt-toggle"
+        title={
+          composerPromptOpen
+            ? ts('chat.loopGraph.composerPromptCollapse')
+            : ts('chat.loopGraph.composerPromptExpand')
+        }
+        aria-label={
+          composerPromptOpen
+            ? ts('chat.loopGraph.composerPromptCollapse')
+            : ts('chat.loopGraph.composerPromptExpand')
+        }
+        onClick={() => setComposerPromptOpen(!composerPromptOpen)}
+      >
+        <span className={styles.promptPullGrip} aria-hidden />
+        {composerPromptOpen ? (
+          <ChevronDown size={14} strokeWidth={2} aria-hidden />
+        ) : (
+          <>
+            <ChevronUp size={14} strokeWidth={2} aria-hidden />
+            <span className={styles.promptPullLabel}>
+              {composerDraft.trim()
+                ? composerDraft.trim().slice(0, 48)
+                : ts('chat.loopGraph.composerPromptPeek')}
+            </span>
+          </>
+        )}
+      </button>
+
+      <div
+        id="loop-goal-prompt-dock"
+        className={styles.promptDock}
+        hidden={!composerPromptOpen}
+        data-testid="loop-composer-prompt-dock"
+      >
         {composeVoice.voice.state.error ? (
           <VoiceInputErrorBanner
             errorKey={composeVoice.voice.state.error}

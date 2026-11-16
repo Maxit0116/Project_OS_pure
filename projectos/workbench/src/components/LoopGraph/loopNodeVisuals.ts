@@ -1,9 +1,16 @@
 import type { LucideIcon } from 'lucide-react'
 import {
+  Bell,
+  BookOpen,
+  Bot,
   Box,
+  Boxes,
   Brain,
+  Bug,
+  Building2,
   CircleCheck,
   ClipboardList,
+  Clock,
   Code2,
   Cpu,
   FlaskConical,
@@ -11,9 +18,11 @@ import {
   GitFork,
   GitPullRequest,
   Hourglass,
+  Library,
   Merge,
   MessageSquare,
   MessageSquareWarning,
+  Palette,
   Puzzle,
   RefreshCw,
   Repeat,
@@ -40,9 +49,17 @@ export const LOOP_PALETTE_MIME = 'application/x-projectos-loop-palette'
 
 export type LoopVisualKey =
   | 'workgroup.create'
+  | 'workgroup.department'
+  | 'agent.workforce'
+  | 'agent.specialist'
   | 'agent.planner'
   | 'agent.coder'
   | 'agent.reviewer'
+  | 'agent.architect'
+  | 'agent.researcher'
+  | 'agent.tester'
+  | 'agent.debugger'
+  | 'agent.documenter'
   | 'action.test'
   | 'action.github.create_pr'
   | 'action.github.create_branch'
@@ -51,12 +68,15 @@ export type LoopVisualKey =
   | 'action.lark.post_message'
   | 'action.sentry.list_issues'
   | 'action.terminal'
+  | 'action.notify'
+  | 'action.lab.verify'
   | 'logic.condition'
   | 'logic.loop'
   | 'logic.merge'
   | 'logic.exit'
   | 'logic.retry'
   | 'logic.wait'
+  | 'logic.schedule'
   | 'human.approval'
   | 'human.review'
   | 'human.input'
@@ -65,6 +85,8 @@ export type LoopVisualKey =
   | 'config.memory.buffer'
   | 'config.skill'
   | 'config.mcp'
+  | 'config.skill_list'
+  | 'config.mcp_list'
   | 'draft'
 
 export type LoopNodeVisual = {
@@ -85,8 +107,29 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     key: 'workgroup.create',
     category: 'workgroup',
     Icon: Users,
-    shortLabel: 'Work Group',
+    shortLabel: 'Empty WG',
     categoryClass: 'catWorkgroup',
+  },
+  'workgroup.department': {
+    key: 'workgroup.department',
+    category: 'workgroup',
+    Icon: Building2,
+    shortLabel: 'Department',
+    categoryClass: 'catWorkgroup',
+  },
+  'agent.workforce': {
+    key: 'agent.workforce',
+    category: 'agent',
+    Icon: Library,
+    shortLabel: 'My Agents',
+    categoryClass: 'catAgent',
+  },
+  'agent.specialist': {
+    key: 'agent.specialist',
+    category: 'agent',
+    Icon: Bot,
+    shortLabel: 'Specialist',
+    categoryClass: 'catAgent',
   },
   'agent.planner': {
     key: 'agent.planner',
@@ -99,7 +142,7 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     key: 'agent.coder',
     category: 'agent',
     Icon: Code2,
-    shortLabel: 'Coder',
+    shortLabel: 'Engineer',
     categoryClass: 'catAgent',
   },
   'agent.reviewer': {
@@ -107,6 +150,41 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     category: 'agent',
     Icon: SearchCheck,
     shortLabel: 'Reviewer',
+    categoryClass: 'catAgent',
+  },
+  'agent.architect': {
+    key: 'agent.architect',
+    category: 'agent',
+    Icon: Boxes,
+    shortLabel: 'Architect',
+    categoryClass: 'catAgent',
+  },
+  'agent.researcher': {
+    key: 'agent.researcher',
+    category: 'agent',
+    Icon: BookOpen,
+    shortLabel: 'Research',
+    categoryClass: 'catAgent',
+  },
+  'agent.tester': {
+    key: 'agent.tester',
+    category: 'agent',
+    Icon: ShieldCheck,
+    shortLabel: 'QA',
+    categoryClass: 'catAgent',
+  },
+  'agent.debugger': {
+    key: 'agent.debugger',
+    category: 'agent',
+    Icon: Bug,
+    shortLabel: 'DevOps',
+    categoryClass: 'catAgent',
+  },
+  'agent.documenter': {
+    key: 'agent.documenter',
+    category: 'agent',
+    Icon: Palette,
+    shortLabel: 'Design',
     categoryClass: 'catAgent',
   },
   'action.test': {
@@ -231,6 +309,27 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     shortLabel: 'Wait',
     categoryClass: 'catLogic',
   },
+  'logic.schedule': {
+    key: 'logic.schedule',
+    category: 'logic',
+    Icon: Clock,
+    shortLabel: 'Schedule',
+    categoryClass: 'catLogic',
+  },
+  'action.notify': {
+    key: 'action.notify',
+    category: 'action',
+    Icon: Bell,
+    shortLabel: 'Notify',
+    categoryClass: 'catAction',
+  },
+  'action.lab.verify': {
+    key: 'action.lab.verify',
+    category: 'action',
+    Icon: FlaskConical,
+    shortLabel: 'Lab',
+    categoryClass: 'catAction',
+  },
   'human.approval': {
     key: 'human.approval',
     category: 'human',
@@ -287,6 +386,20 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
     shortLabel: 'MCP',
     categoryClass: 'catConfig',
   },
+  'config.skill_list': {
+    key: 'config.skill_list',
+    category: 'config',
+    Icon: Puzzle,
+    shortLabel: 'Skills',
+    categoryClass: 'catConfig',
+  },
+  'config.mcp_list': {
+    key: 'config.mcp_list',
+    category: 'config',
+    Icon: Server,
+    shortLabel: 'MCP',
+    categoryClass: 'catConfig',
+  },
   draft: {
     key: 'draft',
     category: 'draft',
@@ -296,7 +409,20 @@ const VISUALS: Record<LoopVisualKey, LoopNodeVisual> = {
   },
 }
 
-export function visualForPaletteItem(item: Pick<LoopPaletteItem, 'id'>): LoopNodeVisual {
+export function visualForPaletteItem(
+  item: Pick<LoopPaletteItem, 'id'> & { seed?: Pick<LoopPaletteItem['seed'], 'agentRole' | 'type'> },
+): LoopNodeVisual {
+  if (item.id.startsWith('workgroup.department.')) {
+    return VISUALS['workgroup.department']
+  }
+  if (item.id.startsWith('agent.curated.')) {
+    return VISUALS[
+      visualKeyFromArchitecture({
+        type: 'agent',
+        agentRole: item.seed?.agentRole,
+      })
+    ]
+  }
   const key = item.id as LoopVisualKey
   return VISUALS[key] ?? VISUALS.draft
 }
@@ -321,12 +447,16 @@ export function visualKeyFromArchitecture(node: {
     }
     if (node.satelliteKind === 'mcp') return 'config.mcp'
     if (node.satelliteKind === 'skill') return 'config.skill'
+    if (node.satelliteKind === 'mcp_list') return 'config.mcp_list'
+    if (node.satelliteKind === 'skill_list') return 'config.skill_list'
     return 'config.model'
   }
   const integration = node.actionIntegration
   const operation = node.actionOperation
   if (integration === 'test') return 'action.test'
   if (integration === 'terminal') return 'action.terminal'
+  if (integration === 'notify') return 'action.notify'
+  if (integration === 'lab') return 'action.lab.verify'
   if (integration === 'slack') return 'action.slack.post_message'
   if (integration === 'feishu') return 'action.feishu.post_message'
   if (integration === 'lark') return 'action.lark.post_message'
@@ -338,16 +468,22 @@ export function visualKeyFromArchitecture(node: {
   if (node.agentRole === 'planner') return 'agent.planner'
   if (node.agentRole === 'coder') return 'agent.coder'
   if (node.agentRole === 'reviewer') return 'agent.reviewer'
+  if (node.agentRole === 'architect') return 'agent.architect'
+  if (node.agentRole === 'researcher') return 'agent.researcher'
+  if (node.agentRole === 'tester') return 'agent.tester'
+  if (node.agentRole === 'debugger') return 'agent.debugger'
+  if (node.agentRole === 'documenter') return 'agent.documenter'
   if (node.logicKind === 'condition') return 'logic.condition'
   if (node.logicKind === 'loop') return 'logic.loop'
   if (node.logicKind === 'merge') return 'logic.merge'
   if (node.logicKind === 'exit') return 'logic.exit'
   if (node.logicKind === 'retry') return 'logic.retry'
   if (node.logicKind === 'wait') return 'logic.wait'
+  if (node.logicKind === 'schedule') return 'logic.schedule'
   if (node.humanMode === 'approval') return 'human.approval'
   if (node.humanMode === 'review') return 'human.review'
   if (node.humanMode === 'input') return 'human.input'
-  if (node.type === 'agent') return 'agent.coder'
+  if (node.type === 'agent') return 'agent.specialist'
   if (node.type === 'action') return 'action.test'
   if (node.type === 'logic') return 'logic.condition'
   if (node.type === 'human') return 'human.approval'
@@ -379,7 +515,8 @@ export function visualForIntentNode(node: IntentGraphNode): LoopNodeVisual {
     return VISUALS[visualKeyFromArchitecture(node)]
   }
   const arch = withArchitectureDefaults(node)
-  const incomplete = !node.prompt?.trim() && !node.type
+  const incomplete =
+    !(node.dutyItems?.length || node.prompt?.trim()) && !node.type
   if (incomplete && !node.agentRole && !node.actionIntegration && !node.logicKind && !node.humanMode) {
     // Untitled blank authoring node
     if (!node.type) return VISUALS.draft

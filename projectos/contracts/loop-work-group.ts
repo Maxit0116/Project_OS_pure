@@ -4,35 +4,170 @@ import {
   isConfigNode,
   withArchitectureDefaults,
 } from "./loop-node-architecture.js";
+import { LoopWorkGroupStaffingProposalSchema } from "./loop-work-group-supervisor.js";
 
 /** Inset between the dashed frame and the member union AABB. */
 export const LOOP_WORK_GROUP_PADDING = 16;
 export const LOOP_WORK_GROUP_TITLE_BAR_HEIGHT = 28;
 
 /** Gap between surface-agent chips in the L1 matrix (not a free canvas). */
-export const LOOP_WORK_GROUP_MATRIX_GAP_X = 10;
-export const LOOP_WORK_GROUP_MATRIX_GAP_Y = 8;
+export const LOOP_WORK_GROUP_MATRIX_GAP_X = 12;
+export const LOOP_WORK_GROUP_MATRIX_GAP_Y = 10;
 /** Cap columns so squads stay a compact rectangle. */
 export const LOOP_WORK_GROUP_MATRIX_MAX_COLS = 3;
 
-/** L1 surface-agent chip size (icon + title). Keep in sync with Overlay CSS. */
-export const LOOP_WORK_GROUP_MEMBER_CHIP_H = 28;
-export const LOOP_WORK_GROUP_MEMBER_CHIP_MIN_W = 104;
-export const LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W = 168;
+/**
+ * L1 surface-agent card inside a work-group frame:
+ * icon + title + duty checklist (no Model/MCP/Skill wiring strip).
+ * Keep in sync with `.nodeWorkGroupMember` in LoopGraph Overlay CSS and
+ * `LoopNodeDutyChecklist` compact canvas limits.
+ * Width/height grow with each member's own content; matrix packing aligns
+ * columns to the widest chip and rows to the tallest chip in that row.
+ */
+export const LOOP_WORK_GROUP_MEMBER_CHIP_H = 64;
+export const LOOP_WORK_GROUP_MEMBER_CHIP_MIN_W = 180;
+export const LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W = 300;
+/** Soft default when title/description are short. */
+export const LOOP_WORK_GROUP_MEMBER_CARD_W = 200;
+/**
+ * Soft ceiling after sizing for visible duties / description lines.
+ * Natural content (5 duties × ~2 text lines) stays under this; extreme
+ * prompts are clamped so one chip cannot dominate the L1 frame.
+ */
+export const LOOP_WORK_GROUP_MEMBER_CHIP_MAX_H = 280;
+/**
+ * Must match `CANVAS_MAX_ITEMS` in LoopNodeDutyChecklist — only this many
+ * duty rows are painted on the canvas chip (plus a "+N more" line).
+ */
+export const LOOP_WORK_GROUP_MEMBER_VISIBLE_DUTIES = 5;
+/** Description / empty-hint lines shown under the title on L1 chips. */
+export const LOOP_WORK_GROUP_MEMBER_BODY_MAX_LINES = 8;
 
-export function estimateWorkGroupMemberChipSize(title: string): {
+export type WorkGroupMemberChipSizeInput = {
+  title?: string;
+  /** Duty prompt / empty-hint body shown under the title. */
+  prompt?: string;
+  /** Compact checklist rows visible on the L1 chip. */
+  dutyItemCount?: number;
+  /** Reserves space for the incomplete badge in the title row. */
+  showIncomplete?: boolean;
+};
+
+/** Approx px width for mixed Latin / CJK label text (12px UI font). */
+function estimateLabelTextWidth(text: string): number {
+  let width = 0;
+  for (const char of text) {
+    const code = char.codePointAt(0) ?? 0;
+    width += code > 0xff ? 12 : 7.2;
+  }
+  return width;
+}
+
+function estimateBodyLineCount(text: string, innerW: number, maxLines: number): number {
+  if (!text) return 1;
+  const avgChar = [...text].some((ch) => (ch.codePointAt(0) ?? 0) > 0xff)
+    ? 12
+    : 7.2;
+  const charsPerLine = Math.max(8, Math.floor(innerW / avgChar));
+  return Math.min(maxLines, Math.max(1, Math.ceil(text.length / charsPerLine)));
+}
+
+/**
+ * Size an L1 work-group member chip from its core content.
+ * Accepts a legacy title string or a structured content descriptor.
+ * Height tracks every visible duty row (and description wrap) so the locked
+ * AABB in the overlay does not clip the checklist / prompt.
+ */
+export function estimateWorkGroupMemberChipSize(
+  titleOrInput?: string | WorkGroupMemberChipSizeInput,
+): {
   width: number;
   height: number;
 } {
-  const label = title.trim() || "Agent";
-  const estimated = 28 + Math.min(label.length, 22) * 7;
-  return {
-    width: Math.min(
-      LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W,
-      Math.max(LOOP_WORK_GROUP_MEMBER_CHIP_MIN_W, estimated),
+  const input: WorkGroupMemberChipSizeInput =
+    typeof titleOrInput === "string" || titleOrInput === undefined
+      ? { title: titleOrInput }
+      : titleOrInput;
+
+  const title = (input.title?.trim() || "Agent").slice(0, 48);
+  const prompt = (input.prompt?.trim() || "").slice(0, 240);
+  const dutyCount = Math.max(0, input.dutyItemCount ?? 0);
+  const showIncomplete = Boolean(input.showIncomplete);
+
+  // Match `.nodeWorkGroupMember` padding / chrome + checklist metrics.
+  const padX = 20;
+  const padY = 16;
+  const border = 2;
+  const icon = 22;
+  const iconGap = 8;
+  const badge = showIncomplete ? 52 : 0;
+  const badgeGap = showIncomplete ? 8 : 0;
+  const gap = 4;
+  // font-size-xs (~12) × line-height 1.35 ≈ 16.
+  const bodyLineH = 16;
+  // Checkbox row: 12px box + primary text line + wrap headroom (clamp is 2).
+  const dutyItemGap = 4;
+  const dutyItemH = 12 + 2 + bodyLineH + Math.ceil(bodyLineH * 0.5);
+  const moreLineH = 14;
+
+  const titleRowChrome = icon + iconGap + badge + badgeGap;
+  const titleWidth = estimateLabelTextWidth(title);
+  // Empty-duty i18n hint is ~18–20 CJK chars; size for that when no prompt/items.
+  const bodyText =
+    dutyCount > 0
+      ? ""
+      : prompt || "添加此节点在工作流中需要完成的任务。";
+  const bodyWidthHint =
+    bodyText.length > 0
+      ? Math.min(
+          LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W - padX - border,
+          Math.ceil(estimateLabelTextWidth(bodyText.slice(0, 28))),
+        )
+      : 0;
+
+  // Prefer widening for the title row; also open a bit for description.
+  const width = Math.min(
+    LOOP_WORK_GROUP_MEMBER_CHIP_MAX_W,
+    Math.max(
+      LOOP_WORK_GROUP_MEMBER_CHIP_MIN_W,
+      Math.ceil(titleWidth + titleRowChrome + padX + border),
+      Math.ceil(bodyWidthHint + padX + border),
     ),
-    height: LOOP_WORK_GROUP_MEMBER_CHIP_H,
-  };
+  );
+
+  const innerW = Math.max(48, width - padX - border);
+  let bodyH = bodyLineH;
+  if (dutyCount > 0) {
+    const visible = Math.min(LOOP_WORK_GROUP_MEMBER_VISIBLE_DUTIES, dutyCount);
+    const hidden = Math.max(0, dutyCount - visible);
+    bodyH =
+      visible * dutyItemH +
+      Math.max(0, visible - 1) * dutyItemGap +
+      (hidden > 0 ? moreLineH + dutyItemGap : 0);
+  } else if (bodyText) {
+    // Default empty-duty hint is long CJK — keep at least two lines so narrow
+    // and wide chips both leave room for the full hint.
+    const minLines = prompt ? 1 : 2;
+    const lines = Math.max(
+      minLines,
+      estimateBodyLineCount(
+        bodyText,
+        innerW,
+        LOOP_WORK_GROUP_MEMBER_BODY_MAX_LINES,
+      ),
+    );
+    bodyH = lines * bodyLineH;
+  }
+
+  const height = Math.min(
+    LOOP_WORK_GROUP_MEMBER_CHIP_MAX_H,
+    Math.max(
+      LOOP_WORK_GROUP_MEMBER_CHIP_H,
+      Math.ceil(padY + icon + gap + bodyH + border),
+    ),
+  );
+
+  return { width, height };
 }
 
 export const LOOP_WORK_GROUP_LIMITS = {
@@ -60,8 +195,72 @@ export type LoopWorkGroupCollaborationMode = z.infer<
   typeof LoopWorkGroupCollaborationModeSchema
 >;
 
-export const LoopWorkGroupPortSchema = z.enum(["in", "out"]);
-export type LoopWorkGroupPort = z.infer<typeof LoopWorkGroupPortSchema>;
+/**
+ * Geometric attachment on the work-group frame (mid-side), same letters as
+ * IntentEdgePort. Legacy documents may still store `in` / `out` — normalize
+ * those to `w` / `e` (historical left-input / right-output).
+ */
+export const LoopWorkGroupPortSchema = z.preprocess((value) => {
+  if (value === "in") return "w";
+  if (value === "out") return "e";
+  return value;
+}, z.enum(["n", "e", "s", "w"]));
+export type LoopWorkGroupPort = "n" | "e" | "s" | "w";
+
+export const LOOP_WORK_GROUP_PORTS: readonly LoopWorkGroupPort[] = [
+  "n",
+  "e",
+  "s",
+  "w",
+];
+
+/** Map legacy or partial values onto a geometric port. */
+export function normalizeLoopWorkGroupPort(
+  port: string | null | undefined,
+  fallback: LoopWorkGroupPort = "e",
+): LoopWorkGroupPort {
+  if (port === "n" || port === "e" || port === "s" || port === "w") return port;
+  if (port === "in") return "w";
+  if (port === "out") return "e";
+  return fallback;
+}
+
+/** World-space midpoint of a frame side for the given geometric port. */
+export function loopWorkGroupPortWorld(
+  bounds: { x: number; y: number; width: number; height: number },
+  port: LoopWorkGroupPort,
+): { x: number; y: number } {
+  const cx = bounds.x + bounds.width / 2;
+  const cy = bounds.y + bounds.height / 2;
+  switch (port) {
+    case "n":
+      return { x: cx, y: bounds.y };
+    case "s":
+      return { x: cx, y: bounds.y + bounds.height };
+    case "w":
+      return { x: bounds.x, y: cy };
+    case "e":
+    default:
+      return { x: bounds.x + bounds.width, y: cy };
+  }
+}
+
+/** Prefer the opposite side when a WG↔WG edge only stores one attachment. */
+export function oppositeLoopWorkGroupPort(
+  port: LoopWorkGroupPort,
+): LoopWorkGroupPort {
+  switch (port) {
+    case "n":
+      return "s";
+    case "s":
+      return "n";
+    case "w":
+      return "e";
+    case "e":
+    default:
+      return "w";
+  }
+}
 
 export const LoopWorkGroupOriginSchema = z
   .object({
@@ -86,6 +285,27 @@ export const LoopWorkGroupSchema = z
     /** Required at compile when mode is coordinator and members.length > 0. */
     coordinatorNodeId: z.string().min(1).optional(),
     /**
+     * When set, this work group was placed from a built-in department template
+     * (`workgroup.department.*`). Dissolving deletes the whole department
+     * (members included) instead of releasing agents to the L1 canvas.
+     * Membership add/remove while the department exists is still allowed.
+     */
+    departmentTemplateId: z.string().min(1).max(120).optional(),
+    /**
+     * User-facing task this squad owns. Display title is derived from
+     * department name (if any) + taskTitle — see
+     * {@link formatLoopWorkGroupDisplayTitle}.
+     */
+    taskTitle: z.string().trim().max(80).optional(),
+    /**
+     * Supervisor staffing proposals: admit a specialist after human confirm.
+     * Pending items surface in the work-group panel; accept joins the group.
+     */
+    staffingProposals: z
+      .array(LoopWorkGroupStaffingProposalSchema)
+      .max(32)
+      .optional(),
+    /**
      * Canvas origin for empty groups (and fallback when members lack positions).
      * When members exist, the dashed frame is the padded AABB of members.
      */
@@ -96,6 +316,83 @@ export const LoopWorkGroupSchema = z
   .strict();
 
 export type LoopWorkGroup = z.infer<typeof LoopWorkGroupSchema>;
+
+/** True when the work group was placed from a built-in department template. */
+export function isLoopDepartmentWorkGroup(
+  group: Pick<LoopWorkGroup, "departmentTemplateId"> | null | undefined,
+): boolean {
+  return Boolean(group?.departmentTemplateId);
+}
+
+/** Placeholder when a plain work group has no task yet. */
+export const LOOP_WORK_GROUP_UNTITLED_TASK = "Untitled task";
+
+/** Separator between department name and task on the L1 title bar. */
+export const LOOP_WORK_GROUP_TITLE_SEPARATOR = " · ";
+
+/**
+ * Canvas / panel display title.
+ * - Plain WG: task (or {@link LOOP_WORK_GROUP_UNTITLED_TASK})
+ * - Department with task: `{department} · {task}`
+ * - Department without task: department name only
+ */
+export function formatLoopWorkGroupDisplayTitle(input: {
+  departmentName?: string | null;
+  taskTitle?: string | null;
+}): string {
+  const department = (input.departmentName ?? "").trim();
+  const task = (input.taskTitle ?? "").trim();
+  if (department && task) {
+    return `${department}${LOOP_WORK_GROUP_TITLE_SEPARATOR}${task}`.slice(0, 120);
+  }
+  if (department) return department.slice(0, 120);
+  if (task) return task.slice(0, 120);
+  return LOOP_WORK_GROUP_UNTITLED_TASK;
+}
+
+/**
+ * Resolve the editable task segment for a work group.
+ * Prefers `taskTitle`; falls back to parsing legacy `title` strings.
+ */
+export function resolveLoopWorkGroupTaskTitle(
+  group: Pick<LoopWorkGroup, "title" | "taskTitle" | "departmentTemplateId">,
+  departmentName?: string | null,
+): string {
+  const stored = group.taskTitle?.trim();
+  if (stored) return stored;
+  const title = group.title.trim();
+  const department = (departmentName ?? "").trim();
+  if (department) {
+    if (title === department) return "";
+    const prefix = `${department}${LOOP_WORK_GROUP_TITLE_SEPARATOR}`;
+    if (title.startsWith(prefix)) {
+      return title.slice(prefix.length).trim();
+    }
+  }
+  // Legacy auto titles are not real tasks.
+  if (/^Workgroup\s+\d+$/i.test(title)) return "";
+  if (title === LOOP_WORK_GROUP_UNTITLED_TASK) return "";
+  return title;
+}
+
+/** Recompute persisted `title` (+ optional `taskTitle`) after a task edit. */
+export function applyLoopWorkGroupTaskTitle(
+  _group: Pick<LoopWorkGroup, "departmentTemplateId">,
+  taskTitle: string | null | undefined,
+  departmentName?: string | null,
+): Pick<LoopWorkGroup, "title" | "taskTitle"> {
+  const nextTask = (taskTitle ?? "").trim().slice(0, 80);
+  const resolvedDepartment = (departmentName ?? "").trim();
+  const patch: Pick<LoopWorkGroup, "title" | "taskTitle"> = {
+    title: formatLoopWorkGroupDisplayTitle({
+      departmentName: resolvedDepartment || null,
+      taskTitle: nextTask || null,
+    }),
+  };
+  if (nextTask) patch.taskTitle = nextTask;
+  else patch.taskTitle = undefined;
+  return patch;
+}
 
 export const LoopWorkGroupRecordStatusSchema = z.enum([
   "pending",
@@ -152,6 +449,10 @@ export interface LoopWorkGroupFrameBounds {
   height: number;
 }
 
+/**
+ * @deprecated Prefer {@link LOOP_WORK_GROUP_UNTITLED_TASK} / task-based titles.
+ * Kept for tests and older callers that still key off sequence labels.
+ */
 export function nextLoopWorkGroupTitle(seq: number): string {
   return `Workgroup ${seq}`;
 }
@@ -286,13 +587,19 @@ export interface WorkGroupMatrixLayoutResult {
   /** Content AABB size (no frame padding / title bar). */
   contentSize: { width: number; height: number };
   columns: number;
+  /** Column stride width (max member width). */
   cellWidth: number;
+  /** Max member height across the matrix (rows may be shorter). */
   cellHeight: number;
+  /** Per-row height = tallest member in that row. */
+  rowHeights: number[];
 }
 
 /**
  * Pack surface Agents into a rectangular matrix under the work-group title bar.
  * `frameOrigin` is the dashed frame's top-left (same as `LoopWorkGroup.origin`).
+ * Columns share one width (widest chip); each row uses that row's tallest chip
+ * so short members do not inherit empty vertical space from other rows.
  */
 export function layoutWorkGroupMemberMatrix(input: {
   frameOrigin: { x: number; y: number };
@@ -319,31 +626,48 @@ export function layoutWorkGroupMemberMatrix(input: {
       columns: 1,
       cellWidth: 0,
       cellHeight: 0,
+      rowHeights: [],
     };
   }
 
   const columns = workGroupMatrixColumnCount(members.length);
   const cellWidth = Math.max(...members.map((member) => member.width));
-  const cellHeight = Math.max(...members.map((member) => member.height));
+  const rows = Math.ceil(members.length / columns);
+  const rowHeights: number[] = Array.from({ length: rows }, (_, row) => {
+    let maxH = 0;
+    for (let col = 0; col < columns; col += 1) {
+      const member = members[row * columns + col];
+      if (!member) continue;
+      maxH = Math.max(maxH, member.height);
+    }
+    return maxH;
+  });
+  const cellHeight = Math.max(...rowHeights);
+  const rowTop: number[] = [];
+  let cursorY = 0;
+  for (let row = 0; row < rows; row += 1) {
+    rowTop[row] = cursorY;
+    cursorY += rowHeights[row]! + (row < rows - 1 ? gapY : 0);
+  }
   const positions = members.map((member, index) => {
     const col = index % columns;
     const row = Math.floor(index / columns);
     return {
       id: member.id,
       x: contentOrigin.x + col * (cellWidth + gapX),
-      y: contentOrigin.y + row * (cellHeight + gapY),
+      y: contentOrigin.y + (rowTop[row] ?? 0),
     };
   });
-  const rows = Math.ceil(members.length / columns);
   return {
     positions,
     contentSize: {
       width: columns * cellWidth + Math.max(0, columns - 1) * gapX,
-      height: rows * cellHeight + Math.max(0, rows - 1) * gapY,
+      height: cursorY,
     },
     columns,
     cellWidth,
     cellHeight,
+    rowHeights,
   };
 }
 
@@ -637,10 +961,20 @@ export function isWorkGroupEndpoint(
   return workGroups.some((group) => group.id === endpointId);
 }
 
+/**
+ * Default geometric port when authoring omits one.
+ * Source (exit) defaults east; target (entry) defaults west — matching the
+ * historical in/out chrome before four-side ports.
+ */
 export function inferWorkGroupPort(
   endpointRole: "source" | "target",
-  explicit?: LoopWorkGroupPort,
+  explicit?: string | null,
 ): LoopWorkGroupPort {
-  if (explicit) return explicit;
-  return endpointRole === "source" ? "out" : "in";
+  if (explicit) {
+    return normalizeLoopWorkGroupPort(
+      explicit,
+      endpointRole === "source" ? "e" : "w",
+    );
+  }
+  return endpointRole === "source" ? "e" : "w";
 }

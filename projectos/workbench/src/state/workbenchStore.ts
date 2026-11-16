@@ -1654,11 +1654,23 @@ async function loadWorkspaceIntoStore(
     })
   }
   attachStructureScanSubscription(project.projectId, client, locale, get, set)
-  await useChatSessionStore.getState().loadForWorkspace()
-  await useTerminalStore.getState().syncMapSessions(mapContent.artifacts)
-  await useDiagnosticsStore.getState().init(project.workspaceRoot)
-  void import('./productLabStore').then(({ useProductLabStore }) => {
-    void useProductLabStore.getState().loadForWorkspace()
+  // Do not await post-ready hydrate on the open path — it blocked the main thread
+  // so the Stage Manager rail could not receive hover for a long time. Yield one
+  // frame for shell paint, then continue chat/terminal/diagnostics in background.
+  const workspaceRoot = project.workspaceRoot
+  const mapArtifacts = mapContent.artifacts
+  requestAnimationFrame(() => {
+    void (async () => {
+      try {
+        await useChatSessionStore.getState().loadForWorkspace()
+        await useTerminalStore.getState().syncMapSessions(mapArtifacts)
+        await useDiagnosticsStore.getState().init(workspaceRoot)
+        const { useProductLabStore } = await import('./productLabStore')
+        void useProductLabStore.getState().loadForWorkspace()
+      } catch (err) {
+        console.error('[workbench] post-ready workspace hydrate failed', err)
+      }
+    })()
   })
 }
 

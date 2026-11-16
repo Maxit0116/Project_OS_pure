@@ -298,7 +298,11 @@ export default function GithubGraphOverlay() {
           const [status, branches, prs, worktrees, store, auth] =
             await Promise.all([
               client.getWorkspaceGitStatus(projectId),
-              client.listWorkspaceGitBranches(projectId),
+              client.listWorkspaceGitBranches(projectId).catch(() => ({
+                defaultBranch: null,
+                currentBranch: null,
+                branches: [],
+              })),
               client.listWorkspacePullRequests(projectId).catch(() => ({
                 available: false,
                 pullRequests: [],

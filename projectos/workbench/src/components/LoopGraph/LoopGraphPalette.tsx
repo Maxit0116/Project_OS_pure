@@ -2,6 +2,7 @@ import { useEffect, useState, type DragEvent } from 'react'
 import { createPortal } from 'react-dom'
 import {
   LOOP_PALETTE_ITEMS,
+  isLoopCuratedAgentPaletteItem,
   type AgentDefinition,
   type LoopGraphPreset,
   type LoopPaletteCategory,
@@ -160,6 +161,11 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
   }
 
   const onAgentItemActivate = (paletteItemId: string) => {
+    // Curated specialists place (and auto-bind) directly; My Agents opens picker.
+    if (isLoopCuratedAgentPaletteItem(paletteItemId)) {
+      void placeItem(paletteItemId)
+      return
+    }
     setSquadSelectedIds([])
     setAgentPickerFor(paletteItemId)
   }
@@ -304,7 +310,12 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
       </div>
 
       {CATEGORIES.map((category) => {
-        const items = LOOP_PALETTE_ITEMS.filter((item) => item.category === category)
+        const items = LOOP_PALETTE_ITEMS.filter((item) => {
+          if (item.category !== category) return false
+          // Programmatic seed only — not shown in the rail.
+          if (item.id === 'agent.specialist') return false
+          return true
+        })
         return (
           <div key={category} className={styles.section}>
             {expanded ? (
@@ -334,8 +345,14 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                             : visual.categoryClass === 'catConfig'
                               ? styles.catConfig
                               : styles.catDraft
+                const isWorkforcePicker = item.id === 'agent.workforce'
+                const isCuratedAgent = isLoopCuratedAgentPaletteItem(item.id)
                 const isAgent = category === 'agent'
                 const needsConfigPicker = Boolean(configPickerKind(item.id))
+                const canDrag =
+                  Boolean(document) &&
+                  !needsConfigPicker &&
+                  !isWorkforcePicker
                 if (!expanded) {
                   return (
                     <button
@@ -345,7 +362,7 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                       disabled={!document}
                       title={item.title}
                       aria-label={`${item.title}. ${item.description}`}
-                      draggable={Boolean(document) && !isAgent && !needsConfigPicker}
+                      draggable={canDrag}
                       onDragStart={(event) => onDragStart(event, item.id)}
                       onClick={(event) =>
                         isAgent
@@ -376,7 +393,8 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                     title={item.description}
                     data-palette-item={item.id}
                     data-loop-integration={visual.integrationId ?? undefined}
-                    draggable={Boolean(document) && !isAgent && !needsConfigPicker}
+                    data-loop-curated-agent={isCuratedAgent ? 'true' : undefined}
+                    draggable={canDrag}
                     onDragStart={(event) => onDragStart(event, item.id)}
                     onClick={(event) =>
                       isAgent
@@ -469,13 +487,14 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                     })
                   }}
                   onSelectGeneral={() => {
-                    const paletteId = agentPickerFor
                     setAgentPickerFor(null)
                     setSquadSelectedIds([])
-                    void placeItem(paletteId, undefined, { agentDefinitionId: null })
+                    void placeItem('agent.specialist', undefined, {
+                      agentDefinitionId: null,
+                      title: ts('workforce.generalAgent'),
+                    })
                   }}
                   onSelectAgent={(definitionId) => {
-                    const paletteId = agentPickerFor
                     const match = workforceAgents.find((agent) => agent.definitionId === definitionId)
                     const listingId = match?.config.marketplaceProvenance?.listingId
                     const catalogListings =
@@ -491,7 +510,7 @@ export default function LoopGraphPalette({ onPlaced, resolveClickPosition }: Pro
                       settings?.modelProfiles?.[0]?.id
                     setAgentPickerFor(null)
                     setSquadSelectedIds([])
-                    void placeItem(paletteId, undefined, {
+                    void placeItem('agent.specialist', undefined, {
                       agentDefinitionId: definitionId,
                       title: match?.config.displayName,
                       ...(template?.suggestedLoopAgentRole

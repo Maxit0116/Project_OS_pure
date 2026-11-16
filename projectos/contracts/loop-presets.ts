@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import {
   IntentGraphSchema,
+  seedDutyItemsFromCapabilityPrompt,
   type IntentGraph,
   type IntentGraphNode,
+  type LoopDutyItem,
 } from "./loop-graph.js";
 import type {
   LoopActionIntegration,
@@ -14,6 +16,7 @@ import type {
   LoopSatelliteKind,
 } from "./loop-node-architecture.js";
 import type { LoopConfigRef } from "./loop-graph.js";
+import { LOOP_DEPARTMENT_TEMPLATES } from "./loop-departments.js";
 
 export const LoopPaletteCategorySchema = z.enum([
   "agent",
@@ -52,11 +55,45 @@ export const LoopPaletteItemSchema = z
           .enum(["approval", "review", "input", "decision", "takeover"])
           .optional(),
         actionIntegration: z
-          .enum(["github", "test", "terminal", "slack", "feishu", "lark", "sentry"])
+          .enum([
+            "github",
+            "test",
+            "terminal",
+            "slack",
+            "feishu",
+            "lark",
+            "sentry",
+            "notify",
+            "lab",
+            "gmail",
+            "linear",
+            "jira_cloud",
+            "notion",
+            "vercel",
+            "supabase",
+            "posthog",
+          ])
           .optional(),
         actionOperation: z.string().trim().min(1).max(80).optional(),
         logicKind: z
-          .enum(["condition", "loop", "merge", "exit", "retry", "wait"])
+          .enum([
+            "condition",
+            "loop",
+            "merge",
+            "exit",
+            "retry",
+            "wait",
+            "schedule",
+          ])
+          .optional(),
+        waitMs: z.number().int().nonnegative().max(604_800_000).optional(),
+        scheduleMode: z.enum(["delay", "at"]).optional(),
+        scheduleAt: z.string().trim().min(1).max(64).optional(),
+        actionParams: z
+          .record(
+            z.string().min(1).max(80),
+            z.union([z.string().max(2000), z.number().finite(), z.boolean()]),
+          )
           .optional(),
         maxIterations: z.number().int().positive().max(50).optional(),
         repairMode: z.boolean().optional(),
@@ -73,6 +110,23 @@ export const LoopPaletteItemSchema = z
             rulesId: z.string().min(1).max(120).optional(),
           })
           .strict()
+          .optional(),
+        /** Optional explicit duty checklist; otherwise derived from prompt. */
+        dutyItems: z
+          .array(
+            z
+              .object({
+                id: z.string().min(1),
+                text: z.string().trim().min(1).max(240),
+                kind: z.enum(["machine", "human"]),
+                required: z.boolean().default(true),
+                source: z
+                  .enum(["user", "agent", "palette", "migrate", "authoring"])
+                  .optional(),
+              })
+              .strict(),
+          )
+          .max(20)
           .optional(),
       })
       .strict(),
@@ -99,6 +153,17 @@ function seedNode(
   seed: Seed,
   position: { x: number; y: number },
 ): IntentGraphNode {
+  const isConfig = seed.type === "config";
+  const kind =
+    seed.type === "human" || seed.humanMode ? ("human" as const) : ("machine" as const);
+  const dutyItems: LoopDutyItem[] | undefined = isConfig
+    ? undefined
+    : seed.dutyItems && seed.dutyItems.length > 0
+      ? (seed.dutyItems as LoopDutyItem[])
+      : seedDutyItemsFromCapabilityPrompt(seed.prompt, {
+          kind,
+          title: seed.title,
+        });
   return {
     id,
     title: seed.title,
@@ -120,6 +185,11 @@ function seedNode(
       ? { satelliteKind: seed.satelliteKind as LoopSatelliteKind }
       : {}),
     ...(seed.configRef ? { configRef: seed.configRef as LoopConfigRef } : {}),
+    ...(typeof seed.waitMs === "number" ? { waitMs: seed.waitMs } : {}),
+    ...(seed.scheduleMode ? { scheduleMode: seed.scheduleMode } : {}),
+    ...(seed.scheduleAt ? { scheduleAt: seed.scheduleAt } : {}),
+    ...(seed.actionParams ? { actionParams: seed.actionParams } : {}),
+    ...(dutyItems && dutyItems.length > 0 ? { dutyItems } : {}),
   };
 }
 
@@ -127,50 +197,293 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
   {
     id: "workgroup.create",
     category: "workgroup",
-    title: "Work Group",
-    description: "Dashed squad frame for specialist agents",
+    title: "Empty Work Group",
+    description:
+      "Dashed squad frame with a Supervisor who can propose specialists",
     seed: {
       // Placeholder seed — store creates a LoopWorkGroup, not a duty node.
       title: "Work Group",
       prompt: "Agent work group container",
       type: "agent",
+    },
+  },
+  /**
+   * Built-in departments: one-click work groups of curated specialists.
+   * Store routes these ids to placeDepartmentWorkGroup (not a duty node).
+   */
+  ...LOOP_DEPARTMENT_TEMPLATES.map((department) => ({
+    id: department.id,
+    category: "workgroup" as const,
+    title: department.title,
+    description: department.description,
+    seed: {
+      title: department.title,
+      prompt: department.description,
+      type: "agent" as const,
+    },
+  })),
+  /**
+   * Opens the workforce / talent picker (installed specialists + create).
+   * Not a drop-in duty by itself — Palette routes click → AgentPicker.
+   */
+  {
+    id: "agent.workforce",
+    category: "agent",
+    title: "My Agents",
+    description: "Pick an installed specialist or create one",
+    seed: {
+      title: "Specialist Agent",
+      prompt: "Specialist agent bound from the project workforce.",
+      type: "agent",
+    },
+  },
+  /** Fallback seed id for programmatic place (create-agent → canvas). */
+  {
+    id: "agent.specialist",
+    category: "agent",
+    title: "Specialist Agent",
+    description: "Project specialist agent (bound definition)",
+    seed: {
+      title: "Specialist Agent",
+      prompt: "Execute the assigned specialist duty for this loop.",
+      type: "agent",
+    },
+  },
+  /**
+   * Default Work Group Supervisor — seeded into empty work groups as the
+   * coordinator. Detects gaps and proposes admitting specialists (HITL).
+   */
+  {
+    id: "agent.curated.workgroup-supervisor",
+    category: "agent",
+    title: "Supervisor",
+    description:
+      "Work-group staffing officer — intake, detect gaps, propose specialists, dispatch, summarize.",
+    seed: {
+      title: "Supervisor",
+      prompt:
+        "Lead this work group: intake the goal, detect capability gaps, propose admitting specialists when needed, dispatch tasks, and summarize the exit handoff.",
+      type: "agent",
       agentRole: "planner",
+      dutyItems: [
+        {
+          id: "duty_wg_sv_intake",
+          text: "Intake the work-group goal and break it into specialist-sized tasks",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_wg_sv_gap",
+          text: "Detect capability gaps or bottlenecks that current members cannot cover",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_wg_sv_propose",
+          text: "Propose admitting a specialist when a gap is found (await human confirm)",
+          kind: "human",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_wg_sv_dispatch",
+          text: "Dispatch tasks to members and track progress until the squad can exit",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_wg_sv_summarize",
+          text: "Summarize outcomes and hand off through the work-group exit",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+      ],
     },
   },
   {
-    id: "agent.planner",
+    id: "agent.curated.product-planner",
     category: "agent",
-    title: "Planner",
-    description: "Turn a goal into a structured DevPlan",
+    title: "Product Planner",
+    description: "Requirements, user stories, plans, and acceptance criteria.",
     seed: {
-      title: "Planner",
-      prompt: "Analyze the goal and project context, then produce a structured DevPlan.",
+      title: "Product Planner",
+      prompt:
+        "Clarify goals and constraints, then produce PRDs, prioritized tasks, and testable acceptance criteria.",
       type: "agent",
       agentRole: "planner",
     },
   },
   {
-    id: "agent.coder",
+    id: "agent.curated.software-architect",
     category: "agent",
-    title: "Coder",
-    description: "Implement a task and emit a ChangeSet",
+    title: "Architect",
+    description: "System design, module boundaries, APIs, and ADRs.",
     seed: {
-      title: "Coder",
-      prompt: "Implement the assigned task within the allowed write scope.",
+      title: "Architect",
+      prompt:
+        "Analyze repo architecture and propose modular boundaries, API contracts, and ADRs.",
+      type: "agent",
+      agentRole: "architect",
+    },
+  },
+  {
+    id: "agent.curated.ui-ux-designer",
+    category: "agent",
+    title: "UI/UX Designer",
+    description: "Flows, layouts, design systems, and usability guidance.",
+    seed: {
+      title: "UI/UX Designer",
+      prompt:
+        "Describe flows, layouts, and interaction states using the project's existing design language.",
+      type: "agent",
+      agentRole: "documenter",
+    },
+  },
+  {
+    id: "agent.curated.frontend-engineer",
+    category: "agent",
+    title: "Frontend Engineer",
+    description: "Web UI, components, state, and client performance.",
+    seed: {
+      title: "Frontend Engineer",
+      prompt:
+        "Implement accessible UI following the repository's real frontend stack and patterns.",
       type: "agent",
       agentRole: "coder",
     },
   },
   {
-    id: "agent.reviewer",
+    id: "agent.curated.backend-engineer",
     category: "agent",
-    title: "Reviewer",
-    description: "Review changes against requirements",
+    title: "Backend Engineer",
+    description: "APIs, business logic, data access, and auth integration.",
     seed: {
-      title: "Reviewer",
-      prompt: "Review the ChangeSet and tests; emit pass, needs_changes, or blocked.",
+      title: "Backend Engineer",
+      prompt:
+        "Implement APIs and business logic matching existing data, auth, and contract patterns.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.fullstack-engineer",
+    category: "agent",
+    title: "Full-Stack Engineer",
+    description: "End-to-end features across UI, API, and data.",
+    seed: {
+      title: "Full-Stack Engineer",
+      prompt:
+        "Deliver thin vertical slices that keep client and server contracts aligned.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.senior-software-engineer",
+    category: "agent",
+    title: "Senior Engineer",
+    description: "Hard problems, refactors, performance, and engineering judgment.",
+    seed: {
+      title: "Senior Engineer",
+      prompt:
+        "Solve hard bugs, refactors, and performance issues with evidence and controlled blast radius.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.code-reviewer",
+    category: "agent",
+    title: "Code Reviewer",
+    description: "Independent review for correctness, regressions, and clarity.",
+    seed: {
+      title: "Code Reviewer",
+      prompt:
+        "Review changes for correctness, missing tests, and contract breaks; prefer concrete findings.",
       type: "agent",
       agentRole: "reviewer",
+    },
+  },
+  {
+    id: "agent.curated.qa-security",
+    category: "agent",
+    title: "QA & Security",
+    description: "Test strategy, regression checks, and baseline security hygiene.",
+    seed: {
+      title: "QA & Security",
+      prompt:
+        "Derive tests from acceptance criteria and report reproducible failures with security hygiene checks.",
+      type: "agent",
+      agentRole: "tester",
+    },
+  },
+  {
+    id: "agent.curated.devops-reliability",
+    category: "agent",
+    title: "DevOps",
+    description: "CI/CD, containers, observability, and incident response basics.",
+    seed: {
+      title: "DevOps",
+      prompt:
+        "Improve CI/CD, containers, and observability using the repo's existing toolchain — never commit secrets.",
+      type: "agent",
+      agentRole: "debugger",
+    },
+  },
+  {
+    id: "agent.curated.ai-llm-engineer",
+    category: "agent",
+    title: "AI Engineer",
+    description: "LLM features, RAG, agents, tool calling, and evals.",
+    seed: {
+      title: "AI Engineer",
+      prompt:
+        "Build LLM/RAG/agent features that respect harness tool policy and project patterns.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.mobile-crossplatform",
+    category: "agent",
+    title: "Mobile Engineer",
+    description: "iOS, Android, and cross-platform app features.",
+    seed: {
+      title: "Mobile Engineer",
+      prompt:
+        "Implement mobile features for the platforms the user names, following the repo's existing stack.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.data-engineer",
+    category: "agent",
+    title: "Data Engineer",
+    description: "Pipelines, models, warehouses, and data quality.",
+    seed: {
+      title: "Data Engineer",
+      prompt:
+        "Build or improve data pipelines with explicit freshness, schema, and quality checks.",
+      type: "agent",
+      agentRole: "coder",
+    },
+  },
+  {
+    id: "agent.curated.domain-specialist",
+    category: "agent",
+    title: "Domain Specialist",
+    description: "Extensible specialist seat for vertical domains.",
+    seed: {
+      title: "Domain Specialist",
+      prompt:
+        "Ask which domain applies, then work only from user-provided domain evidence and constraints.",
+      type: "agent",
+      agentRole: "researcher",
     },
   },
   {
@@ -354,6 +667,99 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
     },
   },
   {
+    id: "logic.schedule",
+    category: "logic",
+    title: "Schedule",
+    description: "Arm a wall-clock time that auto-starts a Loop Run",
+    seed: {
+      title: "Schedule",
+      prompt: "At the scheduled time, automatically create and start a Loop Run.",
+      type: "logic",
+      logicKind: "schedule",
+      scheduleMode: "delay",
+      waitMs: 3_600_000,
+      dutyItems: [
+        {
+          id: "duty_schedule_arm",
+          text: "Arm schedule for automatic createRun",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_schedule_fire",
+          text: "Fire createRun when due",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+      ],
+    },
+  },
+  {
+    id: "action.notify",
+    category: "action",
+    title: "Notification",
+    description: "Send an in-app notification to the user",
+    seed: {
+      title: "Notification",
+      prompt: "Notify the user via Notification Center (and system notify when unfocused).",
+      type: "action",
+      actionIntegration: "notify",
+      actionOperation: "push",
+      actionParams: {
+        title: "Loop update",
+        body: "A loop step needs your attention.",
+      },
+      dutyItems: [
+        {
+          id: "duty_notify_compose",
+          text: "Compose notification title and body",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_notify_deliver",
+          text: "Deliver to Notification Center",
+          kind: "machine",
+          required: true,
+          source: "palette",
+        },
+      ],
+    },
+  },
+  {
+    id: "action.lab.verify",
+    category: "action",
+    title: "Lab",
+    description: "Open Product Lab with upstream acceptance checklist",
+    seed: {
+      title: "Lab Verify",
+      prompt:
+        "Open a Lab session to accept upstream Agent work against a merged acceptance checklist.",
+      type: "action",
+      actionIntegration: "lab",
+      actionOperation: "verify",
+      dutyItems: [
+        {
+          id: "duty_lab_open",
+          text: "Open Lab session with acceptance checklist",
+          kind: "human",
+          required: true,
+          source: "palette",
+        },
+        {
+          id: "duty_lab_accept",
+          text: "Complete required acceptance items",
+          kind: "human",
+          required: true,
+          source: "palette",
+        },
+      ],
+    },
+  },
+  {
     id: "human.approval",
     category: "human",
     title: "Approval",
@@ -456,6 +862,24 @@ export const LOOP_PALETTE_ITEMS: LoopPaletteItem[] = [
   },
 ].map((item) => LoopPaletteItemSchema.parse(item));
 
+/** Palette ids for curated marketplace Templates (`agent.curated.*`). */
+export const LOOP_CURATED_AGENT_PALETTE_PREFIX = "agent.curated.";
+
+/**
+ * Map `agent.curated.product-planner` → `curated.product-planner`.
+ * Returns null for non-curated palette ids (workforce / specialist fallback).
+ */
+export function loopPaletteAgentListingId(
+  paletteItemId: string,
+): string | null {
+  if (!paletteItemId.startsWith(LOOP_CURATED_AGENT_PALETTE_PREFIX)) return null;
+  return `curated.${paletteItemId.slice(LOOP_CURATED_AGENT_PALETTE_PREFIX.length)}`;
+}
+
+export function isLoopCuratedAgentPaletteItem(paletteItemId: string): boolean {
+  return loopPaletteAgentListingId(paletteItemId) !== null;
+}
+
 function paletteSeed(id: string): Seed {
   const item = LOOP_PALETTE_ITEMS.find((entry) => entry.id === id);
   if (!item) throw new Error(`Missing palette item ${id}`);
@@ -464,12 +888,21 @@ function paletteSeed(id: string): Seed {
 
 function featureDevelopmentDraft(): IntentGraph {
   const nodes: IntentGraphNode[] = [
-    seedNode("n_planner", paletteSeed("agent.planner"), { x: 40, y: 40 }),
+    seedNode("n_planner", paletteSeed("agent.curated.product-planner"), {
+      x: 40,
+      y: 40,
+    }),
     seedNode("n_plan_review", paletteSeed("human.review"), { x: 40, y: 140 }),
-    seedNode("n_coder", paletteSeed("agent.coder"), { x: 40, y: 240 }),
+    seedNode("n_coder", paletteSeed("agent.curated.frontend-engineer"), {
+      x: 40,
+      y: 240,
+    }),
     seedNode("n_test", paletteSeed("action.test"), { x: 40, y: 340 }),
     seedNode("n_condition", paletteSeed("logic.condition"), { x: 40, y: 440 }),
-    seedNode("n_reviewer", paletteSeed("agent.reviewer"), { x: 280, y: 440 }),
+    seedNode("n_reviewer", paletteSeed("agent.curated.code-reviewer"), {
+      x: 280,
+      y: 440,
+    }),
     seedNode("n_approval", paletteSeed("human.approval"), { x: 280, y: 540 }),
     seedNode("n_create_pr", paletteSeed("action.github.create_pr"), {
       x: 280,
@@ -480,7 +913,7 @@ function featureDevelopmentDraft(): IntentGraph {
   return IntentGraphSchema.parse({
     revision: 1,
     graphPrompt:
-      "Feature development: plan → human review → code → test → branch → review → approve PR.",
+      "Feature development: plan → human review → implement → test → branch → review → approve PR.",
     nodes,
     edges: [
       {
@@ -517,7 +950,7 @@ function featureDevelopmentDraft(): IntentGraph {
         target: "n_reviewer",
         kind: "conditional",
         branchKey: "pass",
-        prompt: "Tests passed → AI review",
+        prompt: "Tests passed → code review",
       },
       {
         id: "e6",
@@ -525,7 +958,7 @@ function featureDevelopmentDraft(): IntentGraph {
         target: "n_coder",
         kind: "conditional",
         branchKey: "fail",
-        prompt: "Tests failed → return errors to Coder",
+        prompt: "Tests failed → return errors to Frontend Engineer",
       },
       {
         id: "e7",
@@ -547,19 +980,18 @@ function featureDevelopmentDraft(): IntentGraph {
 
 function parallelResearchDraft(): IntentGraph {
   const nodes: IntentGraphNode[] = [
-    seedNode("n_planner", paletteSeed("agent.planner"), { x: 40, y: 40 }),
-    seedNode("n_research", {
-      ...paletteSeed("agent.coder"),
-      title: "Research",
-      prompt: "Gather related facts and constraints.",
-      agentRole: "researcher",
-    }, { x: 40, y: 160 }),
-    seedNode("n_design", {
-      ...paletteSeed("agent.coder"),
-      title: "Technical Plan",
-      prompt: "Draft a technical approach in parallel with research.",
-      agentRole: "architect",
-    }, { x: 280, y: 160 }),
+    seedNode("n_planner", paletteSeed("agent.curated.product-planner"), {
+      x: 40,
+      y: 40,
+    }),
+    seedNode("n_research", paletteSeed("agent.curated.domain-specialist"), {
+      x: 40,
+      y: 160,
+    }),
+    seedNode("n_design", paletteSeed("agent.curated.software-architect"), {
+      x: 280,
+      y: 160,
+    }),
     seedNode("n_merge", paletteSeed("logic.merge"), { x: 160, y: 280 }),
     seedNode("n_review", paletteSeed("human.review"), { x: 160, y: 400 }),
   ];
@@ -567,7 +999,7 @@ function parallelResearchDraft(): IntentGraph {
   return IntentGraphSchema.parse({
     revision: 1,
     graphPrompt:
-      "Parallel research: plan fans out to Research ∥ Technical Plan, then Merge and Human Review.",
+      "Parallel research: plan fans out to Domain Specialist ∥ Architect, then Merge and Human Review.",
     nodes,
     edges: [
       {
@@ -614,13 +1046,14 @@ export const LOOP_GRAPH_PRESETS: LoopGraphPreset[] = [
     id: "feature_development",
     title: "Feature Development",
     description:
-      "Planner → Human Review → Coder → Tests → Condition → Reviewer → Approval → Create PR",
+      "Product Planner → Human Review → Frontend Engineer → Tests → Condition → Code Reviewer → Approval → Create PR",
     draft: featureDevelopmentDraft(),
   }),
   LoopGraphPresetSchema.parse({
     id: "parallel_research",
     title: "Parallel Research",
-    description: "Planner → (Research ∥ Technical Plan) → Merge → Human Review",
+    description:
+      "Product Planner → (Domain Specialist ∥ Architect) → Merge → Human Review",
     draft: parallelResearchDraft(),
   }),
 ];

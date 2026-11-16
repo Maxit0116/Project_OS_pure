@@ -75,6 +75,7 @@ function mockStore(partial: Record<string, unknown>) {
     document: sampleDoc,
     composerDraft: '',
     composerSheet: 'none',
+    composerPromptOpen: true,
     authoringBusy: false,
     authoringEngine: 'provider',
     authoringFocus: null,
@@ -82,6 +83,7 @@ function mockStore(partial: Record<string, unknown>) {
     clearAuthoringFocus: vi.fn(),
     setAuthoringEngine: vi.fn(),
     setComposerDraft: vi.fn(),
+    setComposerPromptOpen: vi.fn(),
     toggleComposerSheet: vi.fn(),
     setComposerMode: vi.fn(),
     sendAuthoringTurn: vi.fn(),
@@ -276,5 +278,21 @@ describe('LoopGoalComposer', () => {
     const html = renderToStaticMarkup(<LoopGoalComposer />)
     expect(html).not.toContain('chat.loopGraph.clarifySheet')
     expect(html).not.toContain('data-loop-sheet="clarify"')
+  })
+
+  it('collapses the prompt dock by default and keeps a pull handle', () => {
+    mockStore({ composerPromptOpen: false })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-loop-composer-prompt="collapsed"')
+    expect(html).toContain('data-testid="loop-composer-prompt-toggle"')
+    expect(html).toContain('hidden')
+    expect(html).toContain('data-testid="loop-composer-prompt-dock"')
+  })
+
+  it('shows the prompt dock when pulled open', () => {
+    mockStore({ composerPromptOpen: true })
+    const html = renderToStaticMarkup(<LoopGoalComposer />)
+    expect(html).toContain('data-loop-composer-prompt="open"')
+    expect(html).toContain('chat.loopGraph.composerInput')
   })
 })
